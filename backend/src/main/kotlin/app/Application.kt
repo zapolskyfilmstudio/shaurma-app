@@ -718,22 +718,25 @@ private fun createOrder(connection: Connection, deviceId: UUID, request: CreateO
     }
 
     val builtItems = request.items.map { buildOrderItem(connection, it) }
+    val maxCookingMinutes = builtItems.maxOf { it.cookingTime }
     val settings = readSettings(connection)
     validateRequestedTime(request.requestedTime, now, settings, builtItems.any { it.isGrill })
-    val cookingStartTime = calculateCookingStart(request.requestedTime, now, settings.workStart, builtItems.maxOf { it.cookingTime })
+    val cookingStartTime = calculateCookingStart(request.requestedTime, now, settings.workStart, maxCookingMinutes)
+    if (request.requestedTime < cookingStartTime + maxCookingMinutes * 60_000L) {
+        throw ApiException(HttpStatusCode.BadRequest, "INVALID_REQUESTED_TIME", "Requested time is too early for cooking time")
+    }
     val totalPrice = builtItems.sumOf { it.totalPrice }
-    val requestedDate = Instant.ofEpochMilli(request.requestedTime).atZone(MoscowZone).toLocalDate()
-    val datePart = requestedDate.format(java.time.format.DateTimeFormatter.ofPattern("ddMM"))
-    val dateKey = requestedDate.toString()
+    val createdDate = Instant.ofEpochMilli(now).atZone(MoscowZone).toLocalDate()
+    val datePart = createdDate.format(java.time.format.DateTimeFormatter.ofPattern("ddMM"))
 
     repeat(3) {
-        val publicId = nextPublicId(connection, dateKey, datePart)
+        val publicId = nextPublicId(connection, datePart, now)
         if (publicIdExists(connection, publicId)) return@repeat
         val savepoint = connection.setSavepoint("public_id_attempt")
         try {
             val orderId = insertOrder(connection, publicId, device.deviceId, request, cookingStartTime, totalPrice, now)
             builtItems.forEach { insertOrderItem(connection, orderId, it) }
-            insertStatusHistory(connection, orderId, "NEW", "android", now)
+            insertStatusHistory(connection, orderId, null, "NEW", "system", now)
             connection.releaseSavepoint(savepoint)
             return CreateOrderResponse(publicId = publicId, status = "NEW", updatedAt = now)
         } catch (error: SQLException) {
@@ -793,22 +796,28 @@ private fun calculateCookingStart(requestedTime: Long, now: Long, workStart: Loc
     return cookingStart
 }
 
-private fun nextPublicId(connection: Connection, dateKey: String, datePart: String): String {
+private fun nextPublicId(connection: Connection, datePart: String, now: Long): String {
     connection.prepareStatement(
-        "INSERT INTO daily_counter (date_key, date_part, counter) VALUES (?, ?, 0) ON CONFLICT (date_key) DO NOTHING"
+        """
+        INSERT INTO daily_counter (date, counter, created_at, updated_at)
+        VALUES (?, 0, ?, ?)
+        ON CONFLICT (date) DO NOTHING
+        """.trimIndent()
     ).use { statement ->
-        statement.setString(1, dateKey)
-        statement.setString(2, datePart)
+        statement.setString(1, datePart)
+        statement.setLong(2, now)
+        statement.setLong(3, now)
         statement.executeUpdate()
     }
-    connection.prepareStatement("SELECT counter FROM daily_counter WHERE date_key = ? FOR UPDATE").use { statement ->
-        statement.setString(1, dateKey)
+    connection.prepareStatement("SELECT counter FROM daily_counter WHERE date = ? FOR UPDATE").use { statement ->
+        statement.setString(1, datePart)
         statement.executeQuery().use { result -> result.next() }
     }
     val next = connection.prepareStatement(
-        "UPDATE daily_counter SET counter = counter + 1 WHERE date_key = ? RETURNING counter"
+        "UPDATE daily_counter SET counter = counter + 1, updated_at = ? WHERE date = ? RETURNING counter"
     ).use { statement ->
-        statement.setString(1, dateKey)
+        statement.setLong(1, now)
+        statement.setString(2, datePart)
         statement.executeQuery().use { result ->
             result.next()
             result.getInt(1)
@@ -895,18 +904,19 @@ private fun updateOrderStatus(connection: Connection, publicId: String, targetSt
         statement.setLong(3, order.id)
         statement.executeUpdate()
     }
-    insertStatusHistory(connection, order.id, targetStatus, "kitchen", now)
+    insertStatusHistory(connection, order.id, order.status, targetStatus, "kitchen", now)
     return readOrderById(connection, order.id) ?: throw ApiException(HttpStatusCode.NotFound, "ORDER_NOT_FOUND", "Order not found")
 }
 
-private fun insertStatusHistory(connection: Connection, orderId: Long, status: String, changedBy: String, now: Long) {
+private fun insertStatusHistory(connection: Connection, orderId: Long, oldStatus: String?, newStatus: String, changedBy: String, now: Long) {
     connection.prepareStatement(
-        "INSERT INTO order_status_history (order_id, status, changed_at, changed_by) VALUES (?, ?, ?, ?)"
+        "INSERT INTO order_status_history (order_id, old_status, new_status, changed_by, changed_at) VALUES (?, ?, ?, ?, ?)"
     ).use { statement ->
         statement.setLong(1, orderId)
-        statement.setString(2, status)
-        statement.setLong(3, now)
+        statement.setNullableString(2, oldStatus)
+        statement.setString(3, newStatus)
         statement.setString(4, changedBy)
+        statement.setLong(5, now)
         statement.executeUpdate()
     }
 }

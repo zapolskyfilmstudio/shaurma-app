@@ -1,5 +1,6 @@
 CREATE TABLE devices (
-    device_id UUID PRIMARY KEY,
+    id BIGSERIAL PRIMARY KEY,
+    device_id UUID NOT NULL UNIQUE,
     platform TEXT NOT NULL CHECK (platform IN ('android', 'ios')),
     client_number INTEGER NOT NULL UNIQUE,
     name VARCHAR(30),
@@ -75,7 +76,7 @@ CREATE TABLE orders (
 );
 
 CREATE INDEX idx_orders_device_updated_id ON orders (device_id, updated_at, id);
-CREATE INDEX idx_orders_updated_id ON orders (updated_at, id);
+CREATE INDEX idx_orders_updated_at_id ON orders (updated_at, id);
 CREATE INDEX idx_orders_requested_time ON orders (requested_time);
 CREATE INDEX idx_orders_status ON orders (status);
 
@@ -95,21 +96,26 @@ CREATE INDEX idx_order_items_order_id ON order_items (order_id, id);
 CREATE TABLE order_status_history (
     id BIGSERIAL PRIMARY KEY,
     order_id BIGINT NOT NULL REFERENCES orders (id) ON DELETE CASCADE,
-    status TEXT NOT NULL CHECK (status IN ('NEW', 'CONFIRMED', 'COOKING', 'READY', 'COMPLETED')),
+    old_status TEXT CHECK (old_status IS NULL OR old_status IN ('NEW', 'CONFIRMED', 'COOKING', 'READY', 'COMPLETED')),
+    new_status TEXT NOT NULL CHECK (new_status IN ('NEW', 'CONFIRMED', 'COOKING', 'READY', 'COMPLETED')),
+    changed_by TEXT NOT NULL,
     changed_at BIGINT NOT NULL,
-    changed_by TEXT NOT NULL
+    CONSTRAINT order_status_history_changed_by_check CHECK (changed_by IN ('kitchen', 'system'))
 );
 
 CREATE INDEX idx_order_status_history_order_id ON order_status_history (order_id, id);
 
 CREATE TABLE settings (
-    key TEXT PRIMARY KEY,
+    id BIGSERIAL PRIMARY KEY,
+    key TEXT NOT NULL UNIQUE,
     value TEXT NOT NULL,
     updated_at BIGINT NOT NULL
 );
 
 CREATE TABLE daily_counter (
-    date_key TEXT PRIMARY KEY,
-    date_part TEXT NOT NULL,
-    counter INTEGER NOT NULL DEFAULT 0
+    id BIGSERIAL PRIMARY KEY,
+    date VARCHAR(10) UNIQUE NOT NULL,
+    counter INTEGER NOT NULL DEFAULT 0,
+    created_at BIGINT NOT NULL,
+    updated_at BIGINT NOT NULL
 );

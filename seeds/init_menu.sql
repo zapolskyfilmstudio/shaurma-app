@@ -45,3 +45,8 @@ VALUES
   ('cutoff_regular', '22:45', 0),
   ('cutoff_grill', '21:45', 0)
 ON CONFLICT (key) DO NOTHING;
+
+SELECT setval(pg_get_serial_sequence('categories', 'id'), COALESCE((SELECT max(id) FROM categories), 1), true);
+SELECT setval(pg_get_serial_sequence('menu_items', 'id'), COALESCE((SELECT max(id) FROM menu_items), 1), true);
+SELECT setval(pg_get_serial_sequence('additions', 'id'), COALESCE((SELECT max(id) FROM additions), 1), true);
+SELECT setval(pg_get_serial_sequence('removals', 'id'), COALESCE((SELECT max(id) FROM removals), 1), true);
