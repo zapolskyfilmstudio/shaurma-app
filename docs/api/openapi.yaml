@@ -1,0 +1,662 @@
+openapi: 3.0.3
+info:
+  title: Shaurma MVP API
+  version: 1.0.0
+  description: REST API для Android-клиента и рабочей станции повара.
+servers:
+  - url: http://localhost:8080
+security:
+  - bearerAuth: []
+tags:
+  - name: public
+  - name: android
+  - name: kitchen
+  - name: admin
+paths:
+  /api/init:
+    post:
+      tags: [public]
+      security: []
+      summary: Идемпотентная регистрация устройства
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InitRequest'
+      responses:
+        '200':
+          description: Данные клиента
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InitResponse'
+  /api/menu:
+    get:
+      tags: [public]
+      security: []
+      summary: Активное меню и server_time
+      responses:
+        '200':
+          description: Меню
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MenuResponse'
+  /api/profile:
+    post:
+      tags: [android]
+      summary: Обновление профиля устройства
+      parameters:
+        - $ref: '#/components/parameters/DeviceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProfileRequest'
+      responses:
+        '200':
+          description: Профиль обновлён
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InitResponse'
+        '404':
+          $ref: '#/components/responses/DeviceNotFound'
+  /api/order:
+    post:
+      tags: [android]
+      summary: Создать заказ
+      parameters:
+        - $ref: '#/components/parameters/DeviceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateOrderRequest'
+      responses:
+        '200':
+          description: Заказ создан
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateOrderResponse'
+        '403':
+          description: Устройство заблокировано
+        '404':
+          $ref: '#/components/responses/DeviceNotFound'
+  /api/orders/my:
+    get:
+      tags: [android]
+      summary: Заказы текущего устройства
+      parameters:
+        - $ref: '#/components/parameters/DeviceId'
+        - $ref: '#/components/parameters/SinceUpdatedAt'
+        - $ref: '#/components/parameters/SinceId'
+      responses:
+        '200':
+          description: Список заказов
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrdersResponse'
+        '404':
+          $ref: '#/components/responses/DeviceNotFound'
+  /api/orders:
+    get:
+      tags: [kitchen]
+      summary: Заказы для кухни
+      parameters:
+        - $ref: '#/components/parameters/SinceUpdatedAt'
+        - $ref: '#/components/parameters/SinceId'
+      responses:
+        '200':
+          description: Список заказов с клиентами
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KitchenOrdersResponse'
+  /api/order/{public_id}/status:
+    post:
+      tags: [kitchen]
+      summary: Перевести заказ в следующий статус
+      parameters:
+        - name: public_id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateStatusRequest'
+      responses:
+        '200':
+          description: Статус обновлён
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderDto'
+  /api/clients:
+    get:
+      tags: [kitchen]
+      summary: Список клиентов
+      parameters:
+        - name: search
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Клиенты
+  /api/clients/{device_id}/status:
+    put:
+      tags: [kitchen]
+      summary: Заблокировать или разблокировать клиента
+      parameters:
+        - name: device_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Статус клиента обновлён
+  /api/clients/{client_number}/orders:
+    get:
+      tags: [kitchen]
+      summary: История заказов клиента
+      parameters:
+        - name: client_number
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Заказы клиента
+  /api/statistics:
+    get:
+      tags: [kitchen]
+      summary: Статистика COMPLETED заказов по московским датам
+      parameters:
+        - name: from
+          in: query
+          required: false
+          schema:
+            type: string
+            example: '2026-05-17'
+        - name: to
+          in: query
+          required: false
+          schema:
+            type: string
+            example: '2026-05-17'
+      responses:
+        '200':
+          description: Статистика
+  /api/admin/categories:
+    get:
+      tags: [admin]
+      summary: Все категории
+      responses:
+        '200':
+          description: OK
+    post:
+      tags: [admin]
+      summary: Создать категорию
+      responses:
+        '200':
+          description: OK
+  /api/admin/categories/{id}:
+    put:
+      tags: [admin]
+      summary: Обновить категорию
+      responses:
+        '200':
+          description: OK
+    delete:
+      tags: [admin]
+      summary: Мягко скрыть категорию
+      responses:
+        '200':
+          description: OK
+  /api/admin/menu_items:
+    get:
+      tags: [admin]
+      summary: Все позиции меню
+      responses:
+        '200':
+          description: OK
+    post:
+      tags: [admin]
+      summary: Создать позицию меню
+      responses:
+        '200':
+          description: OK
+  /api/admin/menu_items/{id}:
+    put:
+      tags: [admin]
+      summary: Обновить позицию меню
+      responses:
+        '200':
+          description: OK
+    delete:
+      tags: [admin]
+      summary: Мягко скрыть позицию меню
+      responses:
+        '200':
+          description: OK
+  /api/admin/additions:
+    get:
+      tags: [admin]
+      summary: Все дополнения
+      responses:
+        '200':
+          description: OK
+    post:
+      tags: [admin]
+      summary: Создать дополнение
+      responses:
+        '200':
+          description: OK
+  /api/admin/additions/{id}:
+    put:
+      tags: [admin]
+      summary: Обновить дополнение
+      responses:
+        '200':
+          description: OK
+    delete:
+      tags: [admin]
+      summary: Мягко скрыть дополнение
+      responses:
+        '200':
+          description: OK
+  /api/admin/removals:
+    get:
+      tags: [admin]
+      summary: Все исключения
+      responses:
+        '200':
+          description: OK
+    post:
+      tags: [admin]
+      summary: Создать исключение
+      responses:
+        '200':
+          description: OK
+  /api/admin/removals/{id}:
+    put:
+      tags: [admin]
+      summary: Обновить исключение
+      responses:
+        '200':
+          description: OK
+    delete:
+      tags: [admin]
+      summary: Мягко скрыть исключение
+      responses:
+        '200':
+          description: OK
+  /api/admin/settings:
+    get:
+      tags: [admin]
+      summary: Все настройки
+      responses:
+        '200':
+          description: OK
+    put:
+      tags: [admin]
+      summary: Обновить настройки
+      responses:
+        '200':
+          description: OK
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+  parameters:
+    DeviceId:
+      name: X-Device-Id
+      in: header
+      required: true
+      schema:
+        type: string
+        format: uuid
+    SinceUpdatedAt:
+      name: since_updated_at
+      in: query
+      required: true
+      schema:
+        type: integer
+        format: int64
+        default: 0
+    SinceId:
+      name: since_id
+      in: query
+      required: true
+      schema:
+        type: integer
+        format: int64
+        default: 0
+  responses:
+    DeviceNotFound:
+      description: Device not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: DEVICE_NOT_FOUND
+            message: Device not found
+  schemas:
+    ErrorResponse:
+      type: object
+      required: [error, message]
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+    InitRequest:
+      type: object
+      required: [device_id, platform]
+      properties:
+        device_id:
+          type: string
+          format: uuid
+        platform:
+          type: string
+          enum: [android]
+    InitResponse:
+      type: object
+      required: [client_number, is_blocked, server_time]
+      properties:
+        client_number:
+          type: integer
+        name:
+          type: string
+          nullable: true
+        phone:
+          type: string
+          nullable: true
+        is_blocked:
+          type: boolean
+        server_time:
+          type: integer
+          format: int64
+    MenuResponse:
+      type: object
+      required: [server_time, categories]
+      properties:
+        server_time:
+          type: integer
+          format: int64
+        categories:
+          type: array
+          items:
+            $ref: '#/components/schemas/CategoryDto'
+    CategoryDto:
+      type: object
+      required: [id, name, sort_order, is_active, is_grill, items]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        sort_order:
+          type: integer
+        is_active:
+          type: boolean
+        is_grill:
+          type: boolean
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/MenuItemDto'
+    MenuItemDto:
+      type: object
+      required: [id, category_id, name, price, weight, cooking_time, sort_order, is_active, additions, removals]
+      properties:
+        id:
+          type: integer
+        category_id:
+          type: integer
+        name:
+          type: string
+        description:
+          type: string
+          nullable: true
+        price:
+          type: integer
+        weight:
+          type: integer
+        cooking_time:
+          type: integer
+        image_url:
+          type: string
+          nullable: true
+        sort_order:
+          type: integer
+        is_active:
+          type: boolean
+        additions:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdditionDto'
+        removals:
+          type: array
+          items:
+            $ref: '#/components/schemas/RemovalDto'
+    AdditionDto:
+      type: object
+      required: [id, menu_item_id, name, price, weight, is_active]
+      properties:
+        id:
+          type: integer
+        menu_item_id:
+          type: integer
+        name:
+          type: string
+        price:
+          type: integer
+        weight:
+          type: integer
+        is_active:
+          type: boolean
+    RemovalDto:
+      type: object
+      required: [id, menu_item_id, name, is_active]
+      properties:
+        id:
+          type: integer
+        menu_item_id:
+          type: integer
+        name:
+          type: string
+        is_active:
+          type: boolean
+    ProfileRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          nullable: true
+        phone:
+          type: string
+          nullable: true
+    CreateOrderRequest:
+      type: object
+      required: [requested_time, items]
+      properties:
+        requested_time:
+          type: integer
+          format: int64
+        general_comment:
+          type: string
+          nullable: true
+        items:
+          type: array
+          maxItems: 50
+          items:
+            $ref: '#/components/schemas/CreateOrderItemRequest'
+    CreateOrderItemRequest:
+      type: object
+      required: [menu_item_id]
+      properties:
+        menu_item_id:
+          type: integer
+        additions_ids:
+          type: array
+          maxItems: 20
+          items:
+            type: integer
+        removals_ids:
+          type: array
+          maxItems: 20
+          items:
+            type: integer
+    CreateOrderResponse:
+      type: object
+      required: [public_id, status, updated_at]
+      properties:
+        public_id:
+          type: string
+        status:
+          $ref: '#/components/schemas/OrderStatus'
+        updated_at:
+          type: integer
+          format: int64
+    OrdersResponse:
+      type: object
+      required: [orders]
+      properties:
+        orders:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderDto'
+    KitchenOrdersResponse:
+      type: object
+      required: [orders]
+      properties:
+        orders:
+          type: array
+          items:
+            $ref: '#/components/schemas/KitchenOrderDto'
+    OrderDto:
+      type: object
+      required: [id, public_id, status, created_at, updated_at, requested_time, cooking_start_time, total_price, items]
+      properties:
+        id:
+          type: integer
+        public_id:
+          type: string
+        status:
+          $ref: '#/components/schemas/OrderStatus'
+        created_at:
+          type: integer
+          format: int64
+        updated_at:
+          type: integer
+          format: int64
+        requested_time:
+          type: integer
+          format: int64
+        cooking_start_time:
+          type: integer
+          format: int64
+        total_price:
+          type: integer
+        general_comment:
+          type: string
+          nullable: true
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderItemDto'
+    KitchenOrderDto:
+      allOf:
+        - $ref: '#/components/schemas/OrderDto'
+        - type: object
+          required: [client]
+          properties:
+            client:
+              $ref: '#/components/schemas/ClientDto'
+    OrderItemDto:
+      type: object
+      required: [id, menu_item_id, name_snapshot, price_snapshot, weight_snapshot, additions_snapshot, removals_snapshot]
+      properties:
+        id:
+          type: integer
+        menu_item_id:
+          type: integer
+        name_snapshot:
+          type: string
+        price_snapshot:
+          type: integer
+        weight_snapshot:
+          type: integer
+        additions_snapshot:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdditionSnapshot'
+        removals_snapshot:
+          type: array
+          items:
+            $ref: '#/components/schemas/RemovalSnapshot'
+    AdditionSnapshot:
+      type: object
+      required: [id, name, price, weight]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        price:
+          type: integer
+        weight:
+          type: integer
+    RemovalSnapshot:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+    ClientDto:
+      type: object
+      required: [device_id, client_number, is_blocked, created_at]
+      properties:
+        device_id:
+          type: string
+        client_number:
+          type: integer
+        name:
+          type: string
+          nullable: true
+        phone:
+          type: string
+          nullable: true
+        is_blocked:
+          type: boolean
+        created_at:
+          type: integer
+          format: int64
+    UpdateStatusRequest:
+      type: object
+      required: [status]
+      properties:
+        status:
+          $ref: '#/components/schemas/OrderStatus'
+    OrderStatus:
+      type: string
+      enum: [NEW, CONFIRMED, COOKING, READY, COMPLETED]
