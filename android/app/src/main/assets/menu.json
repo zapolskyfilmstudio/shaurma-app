@@ -1,0 +1,111 @@
+{
+  "server_time": 1760000000000,
+  "categories": [
+    {
+      "id": 1,
+      "name": "Шаурма",
+      "sort_order": 1,
+      "is_active": true,
+      "is_grill": true,
+      "items": [
+        {
+          "id": 101,
+          "category_id": 1,
+          "name": "Классическая шаурма",
+          "description": "Курица, овощи, фирменный соус",
+          "price": 260,
+          "weight": 380,
+          "cooking_time": 15,
+          "image_url": null,
+          "sort_order": 1,
+          "is_active": true,
+          "additions": [
+            {
+              "id": 1001,
+              "menu_item_id": 101,
+              "name": "Сыр",
+              "price": 40,
+              "weight": 30,
+              "is_active": true
+            },
+            {
+              "id": 1002,
+              "menu_item_id": 101,
+              "name": "Острый соус",
+              "price": 20,
+              "weight": 15,
+              "is_active": true
+            }
+          ],
+          "removals": [
+            {
+              "id": 2001,
+              "menu_item_id": 101,
+              "name": "Без лука",
+              "is_active": true
+            },
+            {
+              "id": 2002,
+              "menu_item_id": 101,
+              "name": "Без томатов",
+              "is_active": true
+            }
+          ]
+        },
+        {
+          "id": 102,
+          "category_id": 1,
+          "name": "Большая шаурма",
+          "description": "Увеличенная порция с двойной курицей",
+          "price": 340,
+          "weight": 520,
+          "cooking_time": 20,
+          "image_url": null,
+          "sort_order": 2,
+          "is_active": true,
+          "additions": [
+            {
+              "id": 1003,
+              "menu_item_id": 102,
+              "name": "Дополнительное мясо",
+              "price": 90,
+              "weight": 80,
+              "is_active": true
+            }
+          ],
+          "removals": [
+            {
+              "id": 2003,
+              "menu_item_id": 102,
+              "name": "Без зелени",
+              "is_active": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "name": "Напитки",
+      "sort_order": 2,
+      "is_active": true,
+      "is_grill": false,
+      "items": [
+        {
+          "id": 201,
+          "category_id": 2,
+          "name": "Морс",
+          "description": "Клюквенный морс 0.5 л",
+          "price": 120,
+          "weight": 500,
+          "cooking_time": 0,
+          "image_url": null,
+          "sort_order": 1,
+          "is_active": true,
+          "additions": [],
+          "removals": []
+        }
+      ]
+    }
+  ]
+}
