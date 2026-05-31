@@ -69,7 +69,12 @@ fun AppNavigation() {
         }
         composable(Routes.CART) {
             CartScreen(
-                onBack = { navController.popBackStack() },
+                onHomeClick = {
+                    navController.navigate(Routes.MAIN) {
+                        popUpTo(Routes.MAIN) { inclusive = true }
+                    }
+                },
+                onProfileClick = { navController.navigate(Routes.PROFILE) },
                 onEditItem = { itemId -> navController.navigate(Routes.product(itemId)) },
                 onOrderCreated = {
                     navController.navigate(Routes.ORDERS) {
