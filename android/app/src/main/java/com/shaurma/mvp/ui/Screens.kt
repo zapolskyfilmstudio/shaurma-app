@@ -2,6 +2,9 @@ package com.shaurma.mvp.ui
 
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -10,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
@@ -19,7 +23,6 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -38,11 +41,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.shaurma.mvp.data.local.CartItemEntity
-import com.shaurma.mvp.data.local.MenuCategoryEntity
 import com.shaurma.mvp.data.local.MenuItemEntity
 import com.shaurma.mvp.data.local.OrderEntity
 import com.shaurma.mvp.data.repository.totalPrice
@@ -86,44 +91,123 @@ fun BlockedScreen() {
 @Composable
 fun MainScreen(
     onCategoryClick: (Int) -> Unit,
+    onMissingCategoryClick: (String) -> Unit,
     onCartClick: () -> Unit,
     onOrdersClick: () -> Unit,
     onProfileClick: () -> Unit,
     viewModel: MenuViewModel = hiltViewModel(),
 ) {
     val categories by viewModel.categories.collectAsStateWithLifecycle()
-    val cartCount by viewModel.cartCount.collectAsStateWithLifecycle()
+    val menuButtons = remember {
+        listOf("ШАУРМА", "ГРИЛЬ НА УГЛЯХ", "КАРТОШКА & СНЕКИ", "НАПИТКИ", "МОИ ЗАКАЗЫ")
+    }
+    var sharedFontSize by remember { mutableStateOf(28.sp) }
 
-    Scaffold(
-        topBar = { TopAppBar(title = { Text("Главное меню") }) },
-    ) { padding ->
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            item {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = onOrdersClick) { Text("Мои заказы") }
-                    OutlinedButton(onClick = onProfileClick) { Text("Профиль") }
-                    OutlinedButton(onClick = onCartClick) { Text("Корзина ($cartCount)") }
+    BoxWithConstraints(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(ShaurmaBlack),
+    ) {
+        val topZoneHeight = maxHeight * 0.15f
+        val bottomZoneHeight = maxHeight * 0.85f
+        val buttonWidth = maxWidth * 0.8f
+        val buttonHeight = bottomZoneHeight * 0.08f
+        val buttonGap = bottomZoneHeight * 0.03f
+
+        Column(modifier = Modifier.fillMaxSize()) {
+            ShaurmaTopZone(
+                topZoneHeight = topZoneHeight,
+                leftIconName = "ic_profile",
+                leftContentDescription = "Личный кабинет",
+                onLeftClick = onProfileClick,
+                rightIconName = "ic_cart",
+                rightContentDescription = "Корзина",
+                onRightClick = onCartClick,
+            )
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(bottomZoneHeight),
+                contentAlignment = Alignment.Center,
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(buttonGap),
+                ) {
+                    menuButtons.forEach { title ->
+                        ShaurmaOutlinedMenuButton(
+                            text = title,
+                            width = buttonWidth,
+                            height = buttonHeight,
+                            fontSize = sharedFontSize,
+                            onFontOverflow = { sharedFontSize *= 0.9f },
+                            onClick = {
+                                if (title == "МОИ ЗАКАЗЫ") {
+                                    onOrdersClick()
+                                } else {
+                                    val category = categories.firstOrNull { it.name.normalizedMenuName() == title.normalizedMenuName() }
+                                    if (category == null) onMissingCategoryClick(title) else onCategoryClick(category.id)
+                                }
+                            },
+                        )
+                    }
                 }
-            }
-            items(categories, key = { it.id }) { category ->
-                CategoryCard(category = category, onClick = { onCategoryClick(category.id) })
             }
         }
     }
 }
 
 @Composable
-private fun CategoryCard(category: MenuCategoryEntity, onClick: () -> Unit) {
-    Card(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp)) {
-            Text(category.name, style = MaterialTheme.typography.titleLarge)
-            Text(if (category.isGrill) "Гриль" else "Без приготовления на гриле")
+fun MissingCategoryScreen(
+    title: String,
+    onHomeClick: () -> Unit,
+    onCartClick: () -> Unit,
+) {
+    BoxWithConstraints(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(ShaurmaBlack),
+    ) {
+        val topZoneHeight = maxHeight * 0.15f
+        val bottomZoneHeight = maxHeight * 0.85f
+        val fontFamily = rememberShaurmaFontFamily()
+
+        Column(modifier = Modifier.fillMaxSize()) {
+            ShaurmaTopZone(
+                topZoneHeight = topZoneHeight,
+                leftIconName = "home",
+                leftContentDescription = "Главное меню",
+                onLeftClick = onHomeClick,
+                rightIconName = "ic_cart",
+                rightContentDescription = "Корзина",
+                onRightClick = onCartClick,
+            )
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(bottomZoneHeight)
+                    .padding(horizontal = maxWidth * 0.1f),
+                contentAlignment = Alignment.Center,
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = title.uppercase(),
+                        color = ShaurmaWhite,
+                        fontFamily = fontFamily,
+                        fontSize = 26.sp,
+                        textAlign = TextAlign.Center,
+                    )
+                    Spacer(Modifier.height(bottomZoneHeight * 0.03f))
+                    Text(
+                        text = "Раздел скоро появится",
+                        color = ShaurmaTextGray,
+                        fontFamily = fontFamily,
+                        fontSize = 18.sp,
+                        textAlign = TextAlign.Center,
+                    )
+                }
+            }
         }
     }
 }
@@ -518,43 +602,102 @@ private fun OrderCard(order: OrderEntity) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ProfileScreen(
-    onBack: () -> Unit,
+    onHomeClick: () -> Unit,
+    onCartClick: () -> Unit,
     viewModel: ProfileViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("Профиль") },
-                navigationIcon = { TextButton(onClick = onBack) { Text("Назад") } },
+    var sharedFontSize by remember { mutableStateOf(28.sp) }
+
+    BoxWithConstraints(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(ShaurmaBlack),
+    ) {
+        val topZoneHeight = maxHeight * 0.15f
+        val bottomZoneHeight = maxHeight * 0.85f
+        val contentWidth = maxWidth * 0.8f
+        val buttonHeight = bottomZoneHeight * 0.08f
+        val fieldHeight = buttonHeight * 1.4f
+        val verticalGap = bottomZoneHeight * 0.035f
+        val fontFamily = rememberShaurmaFontFamily()
+
+        Column(modifier = Modifier.fillMaxSize()) {
+            ShaurmaTopZone(
+                topZoneHeight = topZoneHeight,
+                leftIconName = "home",
+                leftContentDescription = "Главное меню",
+                onLeftClick = onHomeClick,
+                rightIconName = "ic_cart",
+                rightContentDescription = "Корзина",
+                onRightClick = onCartClick,
             )
-        },
-    ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Text("Клиент № ${state.profile?.clientNumber ?: "..." }")
-            Text("Device ID: ${state.profile?.deviceId.orEmpty()}")
-            HorizontalDivider()
-            OutlinedTextField(
-                value = state.name,
-                onValueChange = viewModel::updateName,
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("Имя") },
-            )
-            OutlinedTextField(
-                value = state.phone,
-                onValueChange = viewModel::updatePhone,
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("Телефон") },
-            )
-            state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-            Button(enabled = !state.isSaving, onClick = viewModel::save) {
-                Text(if (state.isSaving) "Сохраняем..." else "Сохранить")
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(bottomZoneHeight),
+                contentAlignment = Alignment.Center,
+            ) {
+                Column(
+                    modifier = Modifier.width(contentWidth),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(verticalGap),
+                ) {
+                    val clientNumber = state.profile?.clientNumber
+                    Text(
+                        text = if (clientNumber == null) {
+                            "Ваш внутренний номер № загружается"
+                        } else {
+                            "Ваш внутренний номер № $clientNumber"
+                        },
+                        color = if (clientNumber == null) ShaurmaTextGray else ShaurmaWhite,
+                        fontFamily = fontFamily,
+                        fontSize = 20.sp,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Text(
+                        text = "Вы можете не указывать Ваши номер телефона и имя. Но если у нас будет вопрос по вашему заказу, мы не сможем с вами связаться и уточнить детали. В этом случае мы будем делать заказ по своим стандартам и претензии не принимаются.",
+                        color = ShaurmaTextGray,
+                        fontFamily = fontFamily,
+                        fontSize = 14.sp,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    ShaurmaProfileTextField(
+                        value = state.name,
+                        placeholder = "Имя",
+                        width = contentWidth,
+                        height = fieldHeight,
+                        onValueChange = viewModel::updateName,
+                    )
+                    ShaurmaProfileTextField(
+                        value = state.phone,
+                        placeholder = "Номер телефона",
+                        width = contentWidth,
+                        height = fieldHeight,
+                        onValueChange = viewModel::updatePhone,
+                        keyboardType = KeyboardType.Phone,
+                    )
+                    state.error?.let {
+                        Text(
+                            text = it,
+                            color = Color.Red,
+                            fontFamily = fontFamily,
+                            fontSize = 14.sp,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                    ShaurmaOutlinedMenuButton(
+                        text = if (state.isSaving) "СОХРАНЯЕМ..." else "СОХРАНИТЬ",
+                        width = contentWidth,
+                        height = buttonHeight,
+                        fontSize = sharedFontSize,
+                        onFontOverflow = { sharedFontSize *= 0.9f },
+                        onClick = viewModel::save,
+                        enabled = !state.isSaving,
+                    )
+                }
             }
         }
     }
@@ -564,6 +707,9 @@ private fun productPrice(state: ProductUiState): Int =
     (state.item?.price ?: 0) + state.additions
         .filter { it.id in state.selectedAdditionIds }
         .sumOf { it.price }
+
+private fun String.normalizedMenuName(): String =
+    trim().replace(Regex("\\s+"), " ").uppercase()
 
 private fun formatMoney(value: Int): String = "$value ₽"
 
