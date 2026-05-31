@@ -101,7 +101,7 @@ fun MainScreen(
     val menuButtons = remember {
         listOf("ШАУРМА", "ГРИЛЬ НА УГЛЯХ", "КАРТОШКА & СНЕКИ", "НАПИТКИ", "МОИ ЗАКАЗЫ")
     }
-    var sharedFontSize by remember { mutableStateOf(28.sp) }
+    val sharedFontSize = remember { mutableStateOf(28.sp) }
 
     BoxWithConstraints(
         modifier = Modifier
@@ -142,8 +142,8 @@ fun MainScreen(
                             text = title,
                             width = buttonWidth,
                             height = buttonHeight,
-                            fontSize = sharedFontSize,
-                            onFontOverflow = { sharedFontSize *= 0.9f },
+                            fontSize = sharedFontSize.value,
+                            onFontOverflow = { sharedFontSize.value = (sharedFontSize.value.value * 0.9f).sp },
                             onClick = {
                                 if (title == "МОИ ЗАКАЗЫ") {
                                     onOrdersClick()
@@ -268,7 +268,7 @@ fun ProductScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
-    var showOptions by remember { mutableStateOf(false) }
+    val showOptions = remember { mutableStateOf(false) }
     val item = state.item
 
     Scaffold(
@@ -293,7 +293,7 @@ fun ProductScreen(
                 item.description?.let { Text(it) }
                 Text("${item.weight} г · готовится ${item.cookingTime} мин")
                 Text("Цена: ${formatMoney(productPrice(state))}", style = MaterialTheme.typography.titleLarge)
-                OutlinedButton(onClick = { showOptions = true }) {
+                OutlinedButton(onClick = { showOptions.value = true }) {
                     Text("Дополнительно / убрать ингредиенты")
                 }
                 Button(
@@ -310,12 +310,12 @@ fun ProductScreen(
         }
     }
 
-    if (showOptions) {
+    if (showOptions.value) {
         ProductOptionsDialog(
             state = state,
             onToggleAddition = viewModel::toggleAddition,
             onToggleRemoval = viewModel::toggleRemoval,
-            onDismiss = { showOptions = false },
+            onDismiss = { showOptions.value = false },
         )
     }
 }
@@ -379,8 +379,8 @@ fun CartScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
-    var deleteCandidate by remember { mutableStateOf<CartItemEntity?>(null) }
-    var editCandidate by remember { mutableStateOf<CartItemEntity?>(null) }
+    val deleteCandidate = remember { mutableStateOf<CartItemEntity?>(null) }
+    val editCandidate = remember { mutableStateOf<CartItemEntity?>(null) }
 
     Scaffold(
         topBar = {
@@ -403,8 +403,8 @@ fun CartScreen(
             items(state.items, key = { it.id }) { item ->
                 CartItemCard(
                     item = item,
-                    onEdit = { editCandidate = item },
-                    onDelete = { deleteCandidate = item },
+                    onEdit = { editCandidate.value = item },
+                    onDelete = { deleteCandidate.value = item },
                 )
             }
             item {
@@ -444,38 +444,38 @@ fun CartScreen(
         }
     }
 
-    deleteCandidate?.let { item ->
+    deleteCandidate.value?.let { item ->
         AlertDialog(
-            onDismissRequest = { deleteCandidate = null },
+            onDismissRequest = { deleteCandidate.value = null },
             title = { Text("Удалить позицию?") },
             text = { Text(item.name) },
             confirmButton = {
                 Button(
                     onClick = {
                         viewModel.deleteItem(item.id)
-                        deleteCandidate = null
+                        deleteCandidate.value = null
                     },
                 ) { Text("Удалить") }
             },
-            dismissButton = { TextButton(onClick = { deleteCandidate = null }) { Text("Отмена") } },
+            dismissButton = { TextButton(onClick = { deleteCandidate.value = null }) { Text("Отмена") } },
         )
     }
 
-    editCandidate?.let { item ->
+    editCandidate.value?.let { item ->
         AlertDialog(
-            onDismissRequest = { editCandidate = null },
+            onDismissRequest = { editCandidate.value = null },
             title = { Text("Изменить позицию?") },
             text = { Text("Текущая позиция будет удалена, затем можно добавить обновлённую.") },
             confirmButton = {
                 Button(
                     onClick = {
                         viewModel.deleteItem(item.id)
-                        editCandidate = null
+                        editCandidate.value = null
                         onEditItem(item.menuItemId)
                     },
                 ) { Text("Изменить") }
             },
-            dismissButton = { TextButton(onClick = { editCandidate = null }) { Text("Отмена") } },
+            dismissButton = { TextButton(onClick = { editCandidate.value = null }) { Text("Отмена") } },
         )
     }
 }
@@ -611,7 +611,7 @@ fun ProfileScreen(
     viewModel: ProfileViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
-    var sharedFontSize by remember { mutableStateOf(28.sp) }
+    val sharedFontSize = remember { mutableStateOf(28.sp) }
 
     BoxWithConstraints(
         modifier = Modifier
@@ -698,8 +698,8 @@ fun ProfileScreen(
                         text = if (state.isSaving) "СОХРАНЯЕМ..." else "СОХРАНИТЬ",
                         width = contentWidth,
                         height = buttonHeight,
-                        fontSize = sharedFontSize,
-                        onFontOverflow = { sharedFontSize *= 0.9f },
+                        fontSize = sharedFontSize.value,
+                        onFontOverflow = { sharedFontSize.value = (sharedFontSize.value.value * 0.9f).sp },
                         onClick = viewModel::save,
                         enabled = !state.isSaving,
                     )
