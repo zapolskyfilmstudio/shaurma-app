@@ -1,15 +1,12 @@
 package com.shaurma.mvp.ui
 
-import android.text.InputType
-import android.view.ViewGroup
-import android.widget.EditText
-import android.widget.NumberPicker
 import androidx.compose.foundation.border
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -19,6 +16,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -35,10 +34,12 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -49,7 +50,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.viewinterop.AndroidView
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.shaurma.mvp.data.local.CartItemEntity
@@ -59,6 +59,7 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 
 private val DateTimeFormatterRu: DateTimeFormatter = DateTimeFormatter.ofPattern("dd.MM HH:mm")
@@ -815,64 +816,55 @@ private fun ShaurmaWheelPicker(
     val valuesKey = safeValues.joinToString(separator = "\u0001")
     val maxIndex = (safeValues.size - 1).coerceAtLeast(0)
     val safeSelectedIndex = selectedIndex.coerceIn(0, maxIndex)
-    AndroidView(
+    val itemHeight = height / 3f
+    val listState = rememberLazyListState(initialFirstVisibleItemIndex = safeSelectedIndex)
+    val fontFamily = rememberShaurmaFontFamily()
+
+    LaunchedEffect(valuesKey, safeSelectedIndex) {
+        if (!listState.isScrollInProgress && listState.firstVisibleItemIndex != safeSelectedIndex) {
+            listState.scrollToItem(safeSelectedIndex)
+        }
+    }
+
+    LaunchedEffect(listState, valuesKey) {
+        snapshotFlow { listState.firstVisibleItemIndex.coerceIn(0, maxIndex) }
+            .distinctUntilChanged()
+            .collect { index ->
+                if (index != safeSelectedIndex) onSelectedIndex(index)
+            }
+    }
+
+    Box(
         modifier = Modifier
             .width(width)
             .height(height)
             .border(2.dp, ShaurmaWhite, RoundedCornerShape(12.dp)),
-        factory = { context ->
-            NumberPicker(context).apply {
-                wrapSelectorWheel = false
-                descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
-                minValue = 0
-                maxValue = maxIndex
-                displayedValues = safeValues.toTypedArray()
-                value = safeSelectedIndex
-                styleShaurmaNumberPicker()
+        contentAlignment = Alignment.Center,
+    ) {
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(vertical = itemHeight),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            itemsIndexed(safeValues) { index, value ->
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(itemHeight),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = value,
+                        color = if (index == safeSelectedIndex) ShaurmaWhite else ShaurmaTextGray,
+                        fontFamily = fontFamily,
+                        fontSize = if (index == safeSelectedIndex) 20.sp else 16.sp,
+                        textAlign = TextAlign.Center,
+                    )
+                }
             }
-        },
-        update = { picker ->
-            picker.setOnValueChangedListener(null)
-            if (picker.tag != valuesKey) {
-                picker.displayedValues = null
-                picker.minValue = 0
-                picker.maxValue = maxIndex
-                picker.displayedValues = safeValues.toTypedArray()
-                picker.tag = valuesKey
-            }
-            if (picker.value != safeSelectedIndex) {
-                picker.value = safeSelectedIndex
-            }
-            picker.setOnValueChangedListener { _, _, newValue -> onSelectedIndex(newValue) }
-            picker.styleShaurmaNumberPicker()
-        },
-    )
-}
-
-private fun NumberPicker.styleShaurmaNumberPicker() {
-    setBackgroundColor(android.graphics.Color.BLACK)
-    for (index in 0 until childCount) {
-        (getChildAt(index) as? EditText)?.apply {
-            setTextColor(android.graphics.Color.WHITE)
-            setHintTextColor(android.graphics.Color.GRAY)
-            textSize = 18f
-            isFocusable = false
-            isFocusableInTouchMode = false
-            inputType = InputType.TYPE_NULL
-            keyListener = null
-            isCursorVisible = false
-            setSelectAllOnFocus(false)
         }
     }
-    try {
-        val paintField = NumberPicker::class.java.getDeclaredField("mSelectorWheelPaint")
-        paintField.isAccessible = true
-        val paint = paintField.get(this) as android.graphics.Paint
-        paint.color = android.graphics.Color.WHITE
-    } catch (_: Exception) {
-        // Some Android versions hide NumberPicker internals; EditText styling above still applies.
-    }
-    invalidate()
 }
 
 private fun allowedHourRange(date: LocalDate, minDateTime: java.time.LocalDateTime, maxDateTime: java.time.LocalDateTime): IntRange {
