@@ -399,7 +399,7 @@ fun CartScreen(
         val topZoneHeight = screenHeight * 0.15f
         val bottomZoneHeight = screenHeight * 0.85f
         val contentWidth = screenWidth * 0.9f
-        val narrowButtonWidth = contentWidth * 0.47f
+        val narrowButtonWidth = contentWidth * 0.42f
         val fullButtonWidth = screenWidth * 0.8f
         val buttonHeight = bottomZoneHeight * 0.075f
         val itemGap = bottomZoneHeight * 0.02f
@@ -601,7 +601,7 @@ private fun CartItemCard(
         )
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
+            horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally),
         ) {
             ShaurmaOutlinedMenuButton(
                 text = "РЕДАКТИРОВАТЬ",
@@ -636,7 +636,8 @@ private fun CartCommentField(
         onValueChange = onValueChange,
         modifier = Modifier
             .width(width)
-            .height(height),
+            .height(height)
+            .border(2.dp, ShaurmaWhite, RoundedCornerShape(12.dp)),
         textStyle = TextStyle(
             color = ShaurmaWhite,
             fontFamily = fontFamily,
@@ -711,6 +712,38 @@ private fun CartDateTimeSelection(
         )
         Row(
             modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            ShaurmaWheelPicker(
+                values = hourRange.toList().map { it.toString().padStart(2, '0') },
+                selectedIndex = (selectedHour - hourRange.first).coerceAtLeast(0),
+                width = width * 0.28f,
+                height = wheelHeight,
+                onSelectedIndex = { index ->
+                    val hour = hourRange.first + index
+                    val minutes = allowedMinuteRange(selectedDate, hour, minDateTime, maxDateTime)
+                    viewModel.setRequestedTime(hour, selectedMinute.coerceIn(minutes.first, minutes.last))
+                },
+            )
+            Text(
+                text = ":",
+                color = ShaurmaWhite,
+                fontFamily = fontFamily,
+                fontSize = 28.sp,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.width(width * 0.08f),
+            )
+            ShaurmaWheelPicker(
+                values = minuteRange.toList().map { it.toString().padStart(2, '0') },
+                selectedIndex = (selectedMinute - minuteRange.first).coerceAtLeast(0),
+                width = width * 0.28f,
+                height = wheelHeight,
+                onSelectedIndex = { index -> viewModel.setRequestedTime(selectedHour, minuteRange.first + index) },
+            )
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -751,38 +784,6 @@ private fun CartDateTimeSelection(
                 },
             )
         }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.Center,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            ShaurmaWheelPicker(
-                values = hourRange.toList().map { it.toString().padStart(2, '0') },
-                selectedIndex = (selectedHour - hourRange.first).coerceAtLeast(0),
-                width = width * 0.28f,
-                height = wheelHeight,
-                onSelectedIndex = { index ->
-                    val hour = hourRange.first + index
-                    val minutes = allowedMinuteRange(selectedDate, hour, minDateTime, maxDateTime)
-                    viewModel.setRequestedTime(hour, selectedMinute.coerceIn(minutes.first, minutes.last))
-                },
-            )
-            Text(
-                text = ":",
-                color = ShaurmaWhite,
-                fontFamily = fontFamily,
-                fontSize = 28.sp,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.width(width * 0.08f),
-            )
-            ShaurmaWheelPicker(
-                values = minuteRange.toList().map { it.toString().padStart(2, '0') },
-                selectedIndex = (selectedMinute - minuteRange.first).coerceAtLeast(0),
-                width = width * 0.28f,
-                height = wheelHeight,
-                onSelectedIndex = { index -> viewModel.setRequestedTime(selectedHour, minuteRange.first + index) },
-            )
-        }
         Text(
             text = "Минимум: ${formatMillis(state.minTimeMillis)}",
             color = ShaurmaTextGray,
@@ -817,7 +818,8 @@ private fun ShaurmaWheelPicker(
     AndroidView(
         modifier = Modifier
             .width(width)
-            .height(height),
+            .height(height)
+            .border(2.dp, ShaurmaWhite, RoundedCornerShape(12.dp)),
         factory = { context ->
             NumberPicker(context).apply {
                 wrapSelectorWheel = false
