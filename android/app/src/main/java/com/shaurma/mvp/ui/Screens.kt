@@ -107,10 +107,12 @@ fun MainScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(ShaurmaBlack),
-    ) {
-        val topZoneHeight = maxHeight * 0.15f
-        val bottomZoneHeight = maxHeight * 0.85f
-        val buttonWidth = maxWidth * 0.8f
+    ) constraints@ {
+        val screenWidth = this@constraints.maxWidth
+        val screenHeight = this@constraints.maxHeight
+        val topZoneHeight = screenHeight * 0.15f
+        val bottomZoneHeight = screenHeight * 0.85f
+        val buttonWidth = screenWidth * 0.8f
         val buttonHeight = bottomZoneHeight * 0.08f
         val buttonGap = bottomZoneHeight * 0.03f
 
@@ -168,9 +170,11 @@ fun MissingCategoryScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(ShaurmaBlack),
-    ) {
-        val topZoneHeight = maxHeight * 0.15f
-        val bottomZoneHeight = maxHeight * 0.85f
+    ) constraints@ {
+        val screenWidth = this@constraints.maxWidth
+        val screenHeight = this@constraints.maxHeight
+        val topZoneHeight = screenHeight * 0.15f
+        val bottomZoneHeight = screenHeight * 0.85f
         val fontFamily = rememberShaurmaFontFamily()
 
         Column(modifier = Modifier.fillMaxSize()) {
@@ -187,7 +191,7 @@ fun MissingCategoryScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(bottomZoneHeight)
-                    .padding(horizontal = maxWidth * 0.1f),
+                    .padding(horizontal = screenWidth * 0.1f),
                 contentAlignment = Alignment.Center,
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -613,10 +617,12 @@ fun ProfileScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(ShaurmaBlack),
-    ) {
-        val topZoneHeight = maxHeight * 0.15f
-        val bottomZoneHeight = maxHeight * 0.85f
-        val contentWidth = maxWidth * 0.8f
+    ) constraints@ {
+        val screenWidth = this@constraints.maxWidth
+        val screenHeight = this@constraints.maxHeight
+        val topZoneHeight = screenHeight * 0.15f
+        val bottomZoneHeight = screenHeight * 0.85f
+        val contentWidth = screenWidth * 0.8f
         val buttonHeight = bottomZoneHeight * 0.08f
         val fieldHeight = buttonHeight * 1.4f
         val verticalGap = bottomZoneHeight * 0.035f
