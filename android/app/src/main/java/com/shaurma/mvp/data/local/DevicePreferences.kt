@@ -68,6 +68,15 @@ class DevicePreferences @Inject constructor(
         }
     }
 
+    suspend fun saveLocalProfile(name: String?, phone: String?, isBlocked: Boolean, serverTime: Long) {
+        store.edit { preferences ->
+            name?.let { preferences[Keys.NAME] = it } ?: preferences.remove(Keys.NAME)
+            phone?.let { preferences[Keys.PHONE] = it } ?: preferences.remove(Keys.PHONE)
+            preferences[Keys.IS_BLOCKED] = isBlocked
+            preferences[Keys.SERVER_TIME_OFFSET] = serverTime - System.currentTimeMillis()
+        }
+    }
+
     suspend fun saveServerTime(serverTime: Long) {
         store.edit { preferences ->
             preferences[Keys.SERVER_TIME_OFFSET] = serverTime - System.currentTimeMillis()
