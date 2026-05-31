@@ -85,12 +85,12 @@ fun AppNavigation() {
         }
         composable(Routes.ORDERS) {
             OrdersScreen(
-                onBack = { navController.popBackStack() },
-                onMainMenu = {
+                onHomeClick = {
                     navController.navigate(Routes.MAIN) {
                         popUpTo(Routes.MAIN) { inclusive = true }
                     }
                 },
+                onCartClick = { navController.navigate(Routes.CART) },
             )
         }
         composable(Routes.PROFILE) {

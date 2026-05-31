@@ -102,6 +102,9 @@ interface OrdersDao {
     @Query("SELECT * FROM orders ORDER BY createdAt DESC, remoteId DESC")
     fun observeOrders(): Flow<List<OrderEntity>>
 
+    @Query("SELECT * FROM order_items ORDER BY orderPublicId, remoteItemId")
+    fun observeOrderItems(): Flow<List<OrderItemEntity>>
+
     @Query("SELECT COALESCE(MAX(updatedAt), 0) FROM orders")
     suspend fun maxUpdatedAt(): Long
 

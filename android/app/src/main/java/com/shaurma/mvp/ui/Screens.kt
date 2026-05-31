@@ -20,7 +20,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.Checkbox
@@ -54,7 +53,6 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.shaurma.mvp.data.local.CartItemEntity
 import com.shaurma.mvp.data.local.MenuItemEntity
-import com.shaurma.mvp.data.local.OrderEntity
 import com.shaurma.mvp.data.repository.totalPrice
 import java.time.Instant
 import java.time.LocalDate
@@ -890,64 +888,147 @@ private fun monthNameRu(month: Int): String =
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun OrdersScreen(
-    onBack: () -> Unit,
-    onMainMenu: () -> Unit,
+    onHomeClick: () -> Unit,
+    onCartClick: () -> Unit,
     viewModel: OrdersViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("Мои заказы") },
-                navigationIcon = { TextButton(onClick = onBack) { Text("Назад") } },
+
+    BoxWithConstraints(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(ShaurmaBlack),
+    ) constraints@ {
+        val screenWidth = this@constraints.maxWidth
+        val screenHeight = this@constraints.maxHeight
+        val topZoneHeight = screenHeight * 0.15f
+        val bottomZoneHeight = screenHeight * 0.85f
+        val contentWidth = screenWidth * 0.9f
+        val itemGap = bottomZoneHeight * 0.02f
+        val fontFamily = rememberShaurmaFontFamily()
+
+        Column(modifier = Modifier.fillMaxSize()) {
+            ShaurmaTopZone(
+                topZoneHeight = topZoneHeight,
+                leftIconName = "home",
+                leftContentDescription = "Главное меню",
+                onLeftClick = onHomeClick,
+                rightIconName = "ic_cart",
+                rightContentDescription = "Корзина",
+                onRightClick = onCartClick,
             )
-        },
-    ) { padding ->
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            item {
-                Button(onClick = onMainMenu) { Text("Главное меню") }
-                if (state.isRefreshing) Text("Обновляем...")
-                state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-            }
+
             if (state.orders.isEmpty()) {
-                item { Text("Заказов пока нет") }
-            }
-            items(state.orders, key = { it.publicId }) { order ->
-                OrderCard(order)
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(bottomZoneHeight),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = "Заказов пока нет",
+                        color = ShaurmaWhite,
+                        fontFamily = fontFamily,
+                        fontSize = 26.sp,
+                        textAlign = TextAlign.Center,
+                    )
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(bottomZoneHeight)
+                        .padding(horizontal = screenWidth * 0.05f),
+                    verticalArrangement = Arrangement.spacedBy(itemGap),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    if (state.isRefreshing) {
+                        item {
+                            Text(
+                                text = "Обновляем...",
+                                color = ShaurmaTextGray,
+                                fontFamily = fontFamily,
+                                fontSize = 14.sp,
+                                modifier = Modifier.width(contentWidth),
+                            )
+                        }
+                    }
+                    state.error?.let {
+                        item {
+                            Text(
+                                text = it,
+                                color = Color.Red,
+                                fontFamily = fontFamily,
+                                fontSize = 14.sp,
+                                modifier = Modifier.width(contentWidth),
+                            )
+                        }
+                    }
+                    items(state.orders, key = { it.order.publicId }) { order ->
+                        OrderCard(order = order, width = contentWidth)
+                    }
+                    item { Spacer(Modifier.height(itemGap)) }
+                }
             }
         }
     }
 }
 
 @Composable
-private fun OrderCard(order: OrderEntity) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text("№ ${order.publicId}", fontWeight = FontWeight.Bold)
-                AssistChip(
-                    onClick = {},
-                    label = { Text(statusLabel(order.status)) },
-                    leadingIcon = {
-                        Text("●", color = statusColor(order.status))
-                    },
+private fun OrderCard(order: OrderWithItemsUiState, width: Dp) {
+    val fontFamily = rememberShaurmaFontFamily()
+    Column(
+        modifier = Modifier
+            .width(width)
+            .border(2.dp, ShaurmaWhite, RoundedCornerShape(12.dp))
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text(
+            text = "Дата и время: ${formatMillis(order.order.createdAt)}",
+            color = ShaurmaWhite,
+            fontFamily = fontFamily,
+            fontSize = 18.sp,
+        )
+        if (order.items.isEmpty()) {
+            Text(
+                text = "Позиции заказа загружаются",
+                color = ShaurmaTextGray,
+                fontFamily = fontFamily,
+                fontSize = 15.sp,
+            )
+        } else {
+            order.items.forEach { item ->
+                Text(
+                    text = "${item.nameSnapshot} — ${formatMoney(item.priceSnapshot)}",
+                    color = ShaurmaWhite,
+                    fontFamily = fontFamily,
+                    fontSize = 16.sp,
                 )
+                if (item.additionsSnapshot.isNotBlank()) {
+                    Text(
+                        text = "Добавки: ${item.additionsSnapshot}",
+                        color = ShaurmaTextGray,
+                        fontFamily = fontFamily,
+                        fontSize = 14.sp,
+                    )
+                }
+                if (item.removalsSnapshot.isNotBlank()) {
+                    Text(
+                        text = "Не класть: ${item.removalsSnapshot}",
+                        color = ShaurmaTextGray,
+                        fontFamily = fontFamily,
+                        fontSize = 14.sp,
+                    )
+                }
             }
-            Text("Создан: ${formatMillis(order.createdAt)}")
-            Text("К получению: ${formatMillis(order.requestedTime)}")
-            Text("Сумма: ${formatMoney(order.totalPrice)}")
-            order.generalComment?.takeIf { it.isNotBlank() }?.let { Text("Комментарий: $it") }
         }
+        Text(
+            text = "Итоговая цена: ${formatMoney(order.order.totalPrice)}",
+            color = ShaurmaWhite,
+            fontFamily = fontFamily,
+            fontSize = 18.sp,
+        )
     }
 }
 
@@ -1069,23 +1150,3 @@ private fun formatMoney(value: Int): String = "$value ₽"
 
 private fun formatMillis(value: Long): String =
     Instant.ofEpochMilli(value).atZone(MoscowZone).toLocalDateTime().format(DateTimeFormatterRu)
-
-private fun statusLabel(status: String): String =
-    when (status) {
-        "NEW" -> "Новый"
-        "CONFIRMED" -> "Подтверждён"
-        "COOKING" -> "Готовится"
-        "READY" -> "Готов"
-        "COMPLETED" -> "Завершён"
-        else -> status
-    }
-
-private fun statusColor(status: String): Color =
-    when (status) {
-        "NEW" -> Color(0xFF1565C0)
-        "CONFIRMED" -> Color(0xFF6A1B9A)
-        "COOKING" -> Color(0xFFE65100)
-        "READY" -> Color(0xFF2E7D32)
-        "COMPLETED" -> Color(0xFF546E7A)
-        else -> Color.Gray
-    }
