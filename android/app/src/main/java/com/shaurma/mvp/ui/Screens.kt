@@ -1,5 +1,6 @@
 package com.shaurma.mvp.ui
 
+import android.text.InputType
 import android.view.ViewGroup
 import android.widget.EditText
 import android.widget.NumberPicker
@@ -809,6 +810,10 @@ private fun ShaurmaWheelPicker(
     height: Dp,
     onSelectedIndex: (Int) -> Unit,
 ) {
+    val safeValues = values.ifEmpty { listOf("") }
+    val valuesKey = safeValues.joinToString(separator = "\u0001")
+    val maxIndex = (safeValues.size - 1).coerceAtLeast(0)
+    val safeSelectedIndex = selectedIndex.coerceIn(0, maxIndex)
     AndroidView(
         modifier = Modifier
             .width(width)
@@ -817,15 +822,25 @@ private fun ShaurmaWheelPicker(
             NumberPicker(context).apply {
                 wrapSelectorWheel = false
                 descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
+                minValue = 0
+                maxValue = maxIndex
+                displayedValues = safeValues.toTypedArray()
+                value = safeSelectedIndex
                 styleShaurmaNumberPicker()
             }
         },
         update = { picker ->
-            picker.displayedValues = null
-            picker.minValue = 0
-            picker.maxValue = (values.size - 1).coerceAtLeast(0)
-            picker.displayedValues = values.toTypedArray()
-            picker.value = selectedIndex.coerceIn(0, (values.size - 1).coerceAtLeast(0))
+            picker.setOnValueChangedListener(null)
+            if (picker.tag != valuesKey) {
+                picker.displayedValues = null
+                picker.minValue = 0
+                picker.maxValue = maxIndex
+                picker.displayedValues = safeValues.toTypedArray()
+                picker.tag = valuesKey
+            }
+            if (picker.value != safeSelectedIndex) {
+                picker.value = safeSelectedIndex
+            }
             picker.setOnValueChangedListener { _, _, newValue -> onSelectedIndex(newValue) }
             picker.styleShaurmaNumberPicker()
         },
@@ -839,6 +854,12 @@ private fun NumberPicker.styleShaurmaNumberPicker() {
             setTextColor(android.graphics.Color.WHITE)
             setHintTextColor(android.graphics.Color.GRAY)
             textSize = 18f
+            isFocusable = false
+            isFocusableInTouchMode = false
+            inputType = InputType.TYPE_NULL
+            keyListener = null
+            isCursorVisible = false
+            setSelectAllOnFocus(false)
         }
     }
     try {
@@ -846,7 +867,7 @@ private fun NumberPicker.styleShaurmaNumberPicker() {
         paintField.isAccessible = true
         val paint = paintField.get(this) as android.graphics.Paint
         paint.color = android.graphics.Color.WHITE
-    } catch (_: ReflectiveOperationException) {
+    } catch (_: Exception) {
         // Some Android versions hide NumberPicker internals; EditText styling above still applies.
     }
     invalidate()
