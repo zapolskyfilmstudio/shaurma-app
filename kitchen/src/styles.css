@@ -445,6 +445,24 @@ th {
   color: #6b7280;
 }
 
+.sound-status {
+  margin: 6px 0 8px;
+  font-size: 14px;
+  color: #166534;
+  font-weight: 600;
+}
+
+.sound-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.sound-actions span {
+  flex: 1 1 auto;
+}
+
 .empty {
   border: 1px dashed #cbd5e1;
   border-radius: 14px;

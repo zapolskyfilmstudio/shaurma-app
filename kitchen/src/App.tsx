@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode } from "react";
 import { api } from "./api";
-import { loadSoundUrl, saveSound, type SoundKey } from "./audioStore";
+import { getSoundStatus, loadSoundUrl, saveSound, type SoundKey, type SoundStatus } from "./audioStore";
 import type {
   AdditionDto,
   CategoryDto,
@@ -153,11 +153,15 @@ function OrdersTab({ soundUrls }: { soundUrls: SoundUrls }) {
   }, []);
 
   const playNewSound = useCallback(() => {
-    const audio = newAudioRef.current;
-    if (!audio) return;
+    if (!soundUrls.new) return;
+    const audio = new Audio(soundUrls.new);
     audio.currentTime = 0;
     void audio.play().catch(() => setSoundBlocked(true));
-  }, []);
+  }, [soundUrls.new]);
+
+  const testNewSound = useCallback(() => {
+    playNewSound();
+  }, [playNewSound]);
 
   const mergeOrders = useCallback((incoming: KitchenOrderDto[]) => {
     if (incoming.length === 0) return;
@@ -279,7 +283,7 @@ function OrdersTab({ soundUrls }: { soundUrls: SoundUrls }) {
 
       {soundBlocked && (
         <div className="notice warning">
-          Браузер заблокировал звук. Нажмите кнопку после любого действия на странице.
+          Браузер заблокировал автозвук. Нажмите «Включить звук» или «Проверить звук» перед новым заказом.
           <button type="button" onClick={() => void unlockSound()}>
             Включить звук
           </button>
@@ -287,7 +291,14 @@ function OrdersTab({ soundUrls }: { soundUrls: SoundUrls }) {
       )}
       {!soundUrls.new || !soundUrls.alarm ? (
         <div className="notice">MP3 для новых заказов и тревоги можно загрузить во вкладке «Работа».</div>
-      ) : null}
+      ) : (
+        <div className="notice success sound-actions">
+          <span>Звуки загружены.</span>
+          <button type="button" onClick={testNewSound}>
+            Проверить звук
+          </button>
+        </div>
+      )}
       {error && <div className="notice error">{error}</div>}
 
       <div className="subtabs">
@@ -849,6 +860,15 @@ function WorkTab({ onSoundsChanged }: { onSoundsChanged: () => Promise<void> }) 
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [soundStatus, setSoundStatus] = useState<Record<SoundKey, SoundStatus>>({
+    new: { loaded: false, fileName: null },
+    alarm: { loaded: false, fileName: null },
+  });
+
+  const refreshSoundStatus = useCallback(async () => {
+    const [newStatus, alarmStatus] = await Promise.all([getSoundStatus("new"), getSoundStatus("alarm")]);
+    setSoundStatus({ new: newStatus, alarm: alarmStatus });
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -869,7 +889,8 @@ function WorkTab({ onSoundsChanged }: { onSoundsChanged: () => Promise<void> }) 
 
   useEffect(() => {
     void load();
-  }, [load]);
+    void refreshSoundStatus();
+  }, [load, refreshSoundStatus]);
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -895,6 +916,7 @@ function WorkTab({ onSoundsChanged }: { onSoundsChanged: () => Promise<void> }) 
     try {
       await saveSound(key, file);
       await onSoundsChanged();
+      await refreshSoundStatus();
       setMessage("MP3 сохранён локально в браузере");
       setError(null);
     } catch (caught) {
@@ -941,13 +963,23 @@ function WorkTab({ onSoundsChanged }: { onSoundsChanged: () => Promise<void> }) 
 
       <div className="sound-box">
         <h3>Локальные MP3</h3>
-        <p>Файлы сохраняются в локальном хранилище браузера и используются для оповещений.</p>
+        <p>Файлы сохраняются в локальном хранилище браузера. Поле выбора файла после перезагрузки страницы всегда выглядит пустым — это нормально.</p>
         <label>
           Короткий звук нового заказа в формате MP3
+          <div className="sound-status">
+            {soundStatus.new.loaded
+              ? `Загружен: ${soundStatus.new.fileName ?? "без имени"}`
+              : "Не загружен"}
+          </div>
           <input type="file" accept="audio/mpeg,audio/mp3" onChange={(event) => void uploadSound("new", event.target.files?.[0] ?? null)} />
         </label>
         <label>
           Зацикленный звук тревоги в формате MP3
+          <div className="sound-status">
+            {soundStatus.alarm.loaded
+              ? `Загружен: ${soundStatus.alarm.fileName ?? "без имени"}`
+              : "Не загружен"}
+          </div>
           <input type="file" accept="audio/mpeg,audio/mp3" onChange={(event) => void uploadSound("alarm", event.target.files?.[0] ?? null)} />
         </label>
       </div>
