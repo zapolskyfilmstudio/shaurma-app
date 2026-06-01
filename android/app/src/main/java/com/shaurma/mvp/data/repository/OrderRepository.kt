@@ -23,6 +23,7 @@ class OrderRepository @Inject constructor(
     private val ordersDao: OrdersDao,
 ) {
     val orders: Flow<List<OrderEntity>> = ordersDao.observeOrders()
+    val orderItems: Flow<List<OrderItemEntity>> = ordersDao.observeOrderItems()
 
     suspend fun createOrder(requestedTime: Long, generalComment: String?) {
         val cartItems = cartDao.cartItems()

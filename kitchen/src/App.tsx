@@ -1,6 +1,15 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode } from "react";
 import { api } from "./api";
-import { loadSoundUrl, saveSound, type SoundKey } from "./audioStore";
+import {
+  clearSoundCache,
+  isAudioUnlocked,
+  playLoopingSound,
+  playSoundUrl,
+  preloadSoundUrl,
+  stopLoopingSound,
+  unlockAudioPlayback,
+} from "./audioPlayback";
+import { getSoundStatus, loadSoundUrl, saveSound, type SoundKey, type SoundStatus } from "./audioStore";
 import type {
   AdditionDto,
   CategoryDto,
@@ -40,6 +49,18 @@ const TABS: Array<{ id: TabId; title: string }> = [
 type Cursor = {
   since_updated_at: number;
   since_id: number;
+};
+
+type OrderRange = {
+  min: number;
+  max: number;
+};
+
+const MENU_ORDER_RANGES: Record<string, OrderRange> = {
+  "ШАУРМА": { min: 1, max: 20 },
+  "ГРИЛЬ НА УГЛЯХ": { min: 21, max: 40 },
+  "КАРТОШКА & СНЕКИ": { min: 41, max: 60 },
+  "НАПИТКИ": { min: 61, max: 80 },
 };
 
 type SoundUrls = Record<SoundKey, string | null>;
@@ -117,35 +138,59 @@ function OrdersTab({ soundUrls }: { soundUrls: SoundUrls }) {
   const [lastPoll, setLastPoll] = useState<number | null>(null);
   const [updating, setUpdating] = useState<string | null>(null);
   const [soundBlocked, setSoundBlocked] = useState(false);
+  const [audioReady, setAudioReady] = useState(false);
   const [now, setNow] = useState(Date.now());
   const seenNewRef = useRef(loadSeenNew());
-  const newAudioRef = useRef<HTMLAudioElement | null>(null);
-  const alarmAudioRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
     cursorRef.current = cursor;
   }, [cursor]);
 
   useEffect(() => {
-    newAudioRef.current = soundUrls.new ? new Audio(soundUrls.new) : null;
-  }, [soundUrls.new]);
-
-  useEffect(() => {
-    alarmAudioRef.current = soundUrls.alarm ? new Audio(soundUrls.alarm) : null;
-    if (alarmAudioRef.current) alarmAudioRef.current.loop = true;
-  }, [soundUrls.alarm]);
+    clearSoundCache();
+    setAudioReady(isAudioUnlocked());
+  }, [soundUrls.new, soundUrls.alarm]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
   }, []);
 
-  const playNewSound = useCallback(() => {
-    const audio = newAudioRef.current;
-    if (!audio) return;
-    audio.currentTime = 0;
-    void audio.play().catch(() => setSoundBlocked(true));
-  }, []);
+  const playNewSound = useCallback(async () => {
+    if (!soundUrls.new) return;
+    const played = await playSoundUrl(soundUrls.new);
+    if (!played) {
+      setSoundBlocked(true);
+      setAudioReady(false);
+    }
+  }, [soundUrls.new]);
+
+  const startShift = useCallback(async () => {
+    if (!soundUrls.new || !soundUrls.alarm) return;
+    setSoundBlocked(false);
+    const unlocked = await unlockAudioPlayback();
+    const [newLoaded, alarmLoaded] = await Promise.all([
+      preloadSoundUrl(soundUrls.new),
+      preloadSoundUrl(soundUrls.alarm),
+    ]);
+    if (!unlocked || !newLoaded || !alarmLoaded) {
+      setSoundBlocked(true);
+      setAudioReady(false);
+      return;
+    }
+    const played = await playSoundUrl(soundUrls.new);
+    if (!played) {
+      setSoundBlocked(true);
+      setAudioReady(false);
+      return;
+    }
+    setAudioReady(true);
+    setSoundBlocked(false);
+  }, [soundUrls.new, soundUrls.alarm]);
+
+  const testNewSound = useCallback(() => {
+    void startShift();
+  }, [startShift]);
 
   const mergeOrders = useCallback((incoming: KitchenOrderDto[]) => {
     if (incoming.length === 0) return;
@@ -163,7 +208,7 @@ function OrdersTab({ soundUrls }: { soundUrls: SoundUrls }) {
     });
     if (newlySeen.length > 0) {
       saveSeenNew(seenNewRef.current);
-      playNewSound();
+      void playNewSound();
     }
   }, [playNewSound]);
 
@@ -203,33 +248,20 @@ function OrdersTab({ soundUrls }: { soundUrls: SoundUrls }) {
   );
 
   useEffect(() => {
-    const audio = alarmAudioRef.current;
-    if (!audio) return;
-    if (alarmActive) {
-      if (audio.paused) {
-        void audio.play().catch(() => setSoundBlocked(true));
-      }
-    } else {
-      audio.pause();
-      audio.currentTime = 0;
+    if (!soundUrls.alarm) return;
+    if (alarmActive && audioReady) {
+      void playLoopingSound(soundUrls.alarm).then((played) => {
+        if (!played) {
+          setSoundBlocked(true);
+          setAudioReady(false);
+        }
+      });
+      return;
     }
-  }, [alarmActive]);
+    stopLoopingSound();
+  }, [alarmActive, audioReady, soundUrls.alarm]);
 
-  const unlockSound = async () => {
-    const audios = [newAudioRef.current, alarmAudioRef.current].filter(Boolean) as HTMLAudioElement[];
-    for (const audio of audios) {
-      try {
-        audio.muted = true;
-        await audio.play();
-        audio.pause();
-        audio.currentTime = 0;
-        audio.muted = false;
-      } catch {
-        audio.muted = false;
-      }
-    }
-    setSoundBlocked(false);
-  };
+  useEffect(() => () => stopLoopingSound(), []);
 
   const selectedDayKey = moscowTodayKey(dayOffset);
   const visibleOrders = orders.filter(
@@ -267,15 +299,29 @@ function OrdersTab({ soundUrls }: { soundUrls: SoundUrls }) {
 
       {soundBlocked && (
         <div className="notice warning">
-          Браузер заблокировал звук. Нажмите кнопку после любого действия на странице.
-          <button type="button" onClick={() => void unlockSound()}>
-            Включить звук
+          Звук не активен. Нажмите «Начать смену» один раз после открытия вкладки.
+          <button type="button" onClick={() => void startShift()}>
+            Начать смену
           </button>
         </div>
       )}
       {!soundUrls.new || !soundUrls.alarm ? (
         <div className="notice">MP3 для новых заказов и тревоги можно загрузить во вкладке «Работа».</div>
-      ) : null}
+      ) : audioReady ? (
+        <div className="notice success sound-actions">
+          <span>Звук включён на смену. Новые заказы будут с сигналом.</span>
+          <button type="button" onClick={testNewSound}>
+            Проверить звук
+          </button>
+        </div>
+      ) : (
+        <div className="notice warning sound-actions">
+          <span>Перед работой нажмите «Начать смену» — иначе браузер не даст автозвук.</span>
+          <button type="button" onClick={() => void startShift()}>
+            Начать смену
+          </button>
+        </div>
+      )}
       {error && <div className="notice error">{error}</div>}
 
       <div className="subtabs">
@@ -469,6 +515,11 @@ function MenuTab() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
+  const sortedItems = useMemo(
+    () => [...items].sort((left, right) => left.sort_order - right.sort_order || left.id - right.id),
+    [items],
+  );
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -523,15 +574,36 @@ function MenuTab() {
   const submitItem = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
+    const categoryId = parseNumber(form.get("category_id"));
+    const category = categories.find((item) => item.id === categoryId);
+    const sortOrder = parseNumber(form.get("sort_order"));
+    const range = category ? menuOrderRange(category) : null;
+    if (!category || !range) {
+      setError("Для выбранной категории не настроен диапазон порядка");
+      return;
+    }
+    if (!editingItem) {
+      const used = new Set(items.filter((item) => item.category_id === categoryId).map((item) => item.sort_order));
+      const hasFreeOrder = Array.from({ length: range.max - range.min + 1 }, (_, index) => range.min + index)
+        .some((order) => !used.has(order));
+      if (!hasFreeOrder) {
+        setError("В этой категории нет свободного порядка");
+        return;
+      }
+    }
+    if (sortOrder < range.min || sortOrder > range.max) {
+      setError(`Порядок должен быть в диапазоне ${range.min}–${range.max} для категории ${category.name}`);
+      return;
+    }
     const body = {
-      category_id: parseNumber(form.get("category_id")),
+      category_id: categoryId,
       name: String(form.get("name") ?? ""),
       description: nullableText(form.get("description")),
       price: parseNumber(form.get("price")),
       weight: parseNumber(form.get("weight")),
       cooking_time: parseNumber(form.get("cooking_time")),
-      image_url: nullableText(form.get("image_url")),
-      sort_order: parseNumber(form.get("sort_order")),
+      image_url: editingItem?.image_url ?? null,
+      sort_order: sortOrder,
       is_active: form.get("is_active") === "on",
     };
     void run(async () => {
@@ -608,15 +680,19 @@ function MenuTab() {
             key={editingItem?.id ?? "new"}
             value={editingItem}
             categories={categories}
+            items={items}
             onSubmit={submitItem}
             onCancel={() => setEditingItem(null)}
           />
-          <DataTable headers={["ИД", "Категория", "Название", "Цена", "Вес", "Мин", "Активна", "Действия"]}>
-            {items.map((item) => (
+          <DataTable headers={["Порядок", "Категория", "Название / Описание", "Цена", "Вес", "Мин", "Активна", "Действия"]}>
+            {sortedItems.map((item) => (
               <tr key={item.id}>
-                <td>{item.id}</td>
+                <td>{item.sort_order}</td>
                 <td>{categoryName(categories, item.category_id)}</td>
-                <td>{item.name}</td>
+                <td>
+                  <strong>{item.name}</strong>
+                  {item.description && <pre className="description-cell">{item.description}</pre>}
+                </td>
                 <td>{formatMoney(item.price)}</td>
                 <td>{item.weight} г</td>
                 <td>{item.cooking_time}</td>
@@ -807,6 +883,15 @@ function WorkTab({ onSoundsChanged }: { onSoundsChanged: () => Promise<void> }) 
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [soundStatus, setSoundStatus] = useState<Record<SoundKey, SoundStatus>>({
+    new: { loaded: false, fileName: null },
+    alarm: { loaded: false, fileName: null },
+  });
+
+  const refreshSoundStatus = useCallback(async () => {
+    const [newStatus, alarmStatus] = await Promise.all([getSoundStatus("new"), getSoundStatus("alarm")]);
+    setSoundStatus({ new: newStatus, alarm: alarmStatus });
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -827,7 +912,8 @@ function WorkTab({ onSoundsChanged }: { onSoundsChanged: () => Promise<void> }) 
 
   useEffect(() => {
     void load();
-  }, [load]);
+    void refreshSoundStatus();
+  }, [load, refreshSoundStatus]);
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -853,6 +939,7 @@ function WorkTab({ onSoundsChanged }: { onSoundsChanged: () => Promise<void> }) 
     try {
       await saveSound(key, file);
       await onSoundsChanged();
+      await refreshSoundStatus();
       setMessage("MP3 сохранён локально в браузере");
       setError(null);
     } catch (caught) {
@@ -899,13 +986,23 @@ function WorkTab({ onSoundsChanged }: { onSoundsChanged: () => Promise<void> }) 
 
       <div className="sound-box">
         <h3>Локальные MP3</h3>
-        <p>Файлы сохраняются в локальном хранилище браузера и используются для оповещений.</p>
+        <p>Файлы сохраняются в локальном хранилище браузера. Поле выбора файла после перезагрузки страницы всегда выглядит пустым — это нормально.</p>
         <label>
           Короткий звук нового заказа в формате MP3
+          <div className="sound-status">
+            {soundStatus.new.loaded
+              ? `Загружен: ${soundStatus.new.fileName ?? "без имени"}`
+              : "Не загружен"}
+          </div>
           <input type="file" accept="audio/mpeg,audio/mp3" onChange={(event) => void uploadSound("new", event.target.files?.[0] ?? null)} />
         </label>
         <label>
           Зацикленный звук тревоги в формате MP3
+          <div className="sound-status">
+            {soundStatus.alarm.loaded
+              ? `Загружен: ${soundStatus.alarm.fileName ?? "без имени"}`
+              : "Не загружен"}
+          </div>
           <input type="file" accept="audio/mpeg,audio/mp3" onChange={(event) => void uploadSound("alarm", event.target.files?.[0] ?? null)} />
         </label>
       </div>
@@ -973,27 +1070,68 @@ function CategoryForm({
 function MenuItemForm({
   value,
   categories,
+  items,
   onSubmit,
   onCancel,
 }: {
   value: MenuItemDto | null;
   categories: CategoryDto[];
+  items: MenuItemDto[];
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   onCancel: () => void;
 }) {
+  const [categoryId, setCategoryId] = useState(value?.category_id ?? categories[0]?.id ?? 0);
+  const [sortOrder, setSortOrder] = useState(
+    value?.sort_order ?? nextFreeMenuSortOrder(categories.find((category) => category.id === (value?.category_id ?? categories[0]?.id)), items),
+  );
+  const selectedCategory = categories.find((category) => category.id === categoryId);
+  const selectedRange = selectedCategory ? menuOrderRange(selectedCategory) : null;
+
+  useEffect(() => {
+    if (value) {
+      setCategoryId(value.category_id);
+      setSortOrder(value.sort_order);
+      return;
+    }
+    const firstCategory = categories[0];
+    if (!firstCategory) return;
+    setCategoryId(firstCategory.id);
+    setSortOrder(nextFreeMenuSortOrder(firstCategory, items));
+  }, [categories, items, value]);
+
+  const handleCategoryChange = (event: ChangeEvent<HTMLSelectElement>) => {
+    const nextCategoryId = Number(event.currentTarget.value);
+    const nextCategory = categories.find((category) => category.id === nextCategoryId);
+    setCategoryId(nextCategoryId);
+    setSortOrder(value ? sortOrder : nextFreeMenuSortOrder(nextCategory, items));
+  };
+
   return (
     <form className="crud-form" onSubmit={onSubmit}>
-      <select name="category_id" defaultValue={value?.category_id ?? categories[0]?.id ?? ""} required>
+      <select name="category_id" value={categoryId || ""} onChange={handleCategoryChange} required>
         <option value="" disabled>Категория</option>
         {categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
       </select>
       <input name="name" placeholder="Название" defaultValue={value?.name ?? ""} required />
-      <input name="description" placeholder="Описание" defaultValue={value?.description ?? ""} />
+      <textarea name="description" placeholder="Описание: каждый ингредиент с новой строки и весом" defaultValue={value?.description ?? ""} rows={4} />
       <input name="price" type="number" placeholder="Цена" defaultValue={value?.price ?? 0} min={0} />
       <input name="weight" type="number" placeholder="Вес" defaultValue={value?.weight ?? 0} min={0} />
       <input name="cooking_time" type="number" placeholder="Минуты" defaultValue={value?.cooking_time ?? 0} min={0} />
-      <input name="image_url" placeholder="Ссылка на картинку" defaultValue={value?.image_url ?? ""} />
-      <input name="sort_order" type="number" placeholder="Порядок" defaultValue={value?.sort_order ?? 0} />
+      <input
+        name="sort_order"
+        type="number"
+        placeholder="Порядок"
+        value={sortOrder}
+        min={selectedRange?.min}
+        max={selectedRange?.max}
+        onChange={(event) => setSortOrder(Number(event.currentTarget.value))}
+        required
+      />
+      {selectedCategory && selectedRange && (
+        <small className="form-hint">
+          Диапазон для {selectedCategory.name}: {selectedRange.min}–{selectedRange.max}
+        </small>
+      )}
       <label><input name="is_active" type="checkbox" defaultChecked={value?.is_active ?? true} /> Активна</label>
       <button type="submit">{value ? "Сохранить" : "Создать"}</button>
       {value && <button type="button" onClick={onCancel}>Отмена</button>}
@@ -1055,6 +1193,29 @@ function RemovalForm({
 
 function categoryName(categories: CategoryDto[], id: number): string {
   return categories.find((category) => category.id === id)?.name ?? `#${id}`;
+}
+
+function normalizedCategoryName(category: CategoryDto): string {
+  return category.name.trim().toUpperCase();
+}
+
+function menuOrderRange(category: CategoryDto): OrderRange | null {
+  return MENU_ORDER_RANGES[normalizedCategoryName(category)] ?? null;
+}
+
+function nextFreeMenuSortOrder(category: CategoryDto | undefined, items: MenuItemDto[]): number {
+  if (!category) return 0;
+  const range = menuOrderRange(category);
+  if (!range) return 0;
+  const used = new Set(
+    items
+      .filter((item) => item.category_id === category.id)
+      .map((item) => item.sort_order),
+  );
+  for (let order = range.min; order <= range.max; order += 1) {
+    if (!used.has(order)) return order;
+  }
+  return range.min;
 }
 
 function itemName(items: MenuItemDto[], id: number): string {

@@ -10,6 +10,7 @@ import com.shaurma.mvp.data.local.DevicePreferences
 import com.shaurma.mvp.data.local.MenuCategoryEntity
 import com.shaurma.mvp.data.local.MenuItemEntity
 import com.shaurma.mvp.data.local.OrderEntity
+import com.shaurma.mvp.data.local.OrderItemEntity
 import com.shaurma.mvp.data.local.RemovalEntity
 import com.shaurma.mvp.data.repository.CartRepository
 import com.shaurma.mvp.data.repository.MenuRepository
@@ -61,9 +62,14 @@ data class CartUiState(
 )
 
 data class OrdersUiState(
-    val orders: List<OrderEntity> = emptyList(),
+    val orders: List<OrderWithItemsUiState> = emptyList(),
     val isRefreshing: Boolean = false,
     val error: String? = null,
+)
+
+data class OrderWithItemsUiState(
+    val order: OrderEntity,
+    val items: List<OrderItemEntity>,
 )
 
 data class ProfileUiState(
@@ -304,10 +310,18 @@ class OrdersViewModel @Inject constructor(
 
     val state: StateFlow<OrdersUiState> = combine(
         orderRepository.orders,
+        orderRepository.orderItems,
         isRefreshing,
         error,
-    ) { orders, refreshing, error ->
-        OrdersUiState(orders = orders, isRefreshing = refreshing, error = error)
+    ) { orders, items, refreshing, error ->
+        val itemsByOrder = items.groupBy { it.orderPublicId }
+        OrdersUiState(
+            orders = orders.map { order ->
+                OrderWithItemsUiState(order = order, items = itemsByOrder[order.publicId].orEmpty())
+            },
+            isRefreshing = refreshing,
+            error = error,
+        )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), OrdersUiState())
 
     init {
