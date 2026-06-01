@@ -1,5 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode } from "react";
 import { api } from "./api";
+import {
+  clearSoundCache,
+  isAudioUnlocked,
+  playLoopingSound,
+  playSoundUrl,
+  preloadSoundUrl,
+  stopLoopingSound,
+  unlockAudioPlayback,
+} from "./audioPlayback";
 import { getSoundStatus, loadSoundUrl, saveSound, type SoundKey, type SoundStatus } from "./audioStore";
 import type {
   AdditionDto,
@@ -129,39 +138,59 @@ function OrdersTab({ soundUrls }: { soundUrls: SoundUrls }) {
   const [lastPoll, setLastPoll] = useState<number | null>(null);
   const [updating, setUpdating] = useState<string | null>(null);
   const [soundBlocked, setSoundBlocked] = useState(false);
+  const [audioReady, setAudioReady] = useState(false);
   const [now, setNow] = useState(Date.now());
   const seenNewRef = useRef(loadSeenNew());
-  const newAudioRef = useRef<HTMLAudioElement | null>(null);
-  const alarmAudioRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
     cursorRef.current = cursor;
   }, [cursor]);
 
   useEffect(() => {
-    newAudioRef.current = soundUrls.new ? new Audio(soundUrls.new) : null;
-  }, [soundUrls.new]);
-
-  useEffect(() => {
-    alarmAudioRef.current = soundUrls.alarm ? new Audio(soundUrls.alarm) : null;
-    if (alarmAudioRef.current) alarmAudioRef.current.loop = true;
-  }, [soundUrls.alarm]);
+    clearSoundCache();
+    setAudioReady(isAudioUnlocked());
+  }, [soundUrls.new, soundUrls.alarm]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
   }, []);
 
-  const playNewSound = useCallback(() => {
+  const playNewSound = useCallback(async () => {
     if (!soundUrls.new) return;
-    const audio = new Audio(soundUrls.new);
-    audio.currentTime = 0;
-    void audio.play().catch(() => setSoundBlocked(true));
+    const played = await playSoundUrl(soundUrls.new);
+    if (!played) {
+      setSoundBlocked(true);
+      setAudioReady(false);
+    }
   }, [soundUrls.new]);
 
+  const startShift = useCallback(async () => {
+    if (!soundUrls.new || !soundUrls.alarm) return;
+    setSoundBlocked(false);
+    const unlocked = await unlockAudioPlayback();
+    const [newLoaded, alarmLoaded] = await Promise.all([
+      preloadSoundUrl(soundUrls.new),
+      preloadSoundUrl(soundUrls.alarm),
+    ]);
+    if (!unlocked || !newLoaded || !alarmLoaded) {
+      setSoundBlocked(true);
+      setAudioReady(false);
+      return;
+    }
+    const played = await playSoundUrl(soundUrls.new);
+    if (!played) {
+      setSoundBlocked(true);
+      setAudioReady(false);
+      return;
+    }
+    setAudioReady(true);
+    setSoundBlocked(false);
+  }, [soundUrls.new, soundUrls.alarm]);
+
   const testNewSound = useCallback(() => {
-    playNewSound();
-  }, [playNewSound]);
+    void startShift();
+  }, [startShift]);
 
   const mergeOrders = useCallback((incoming: KitchenOrderDto[]) => {
     if (incoming.length === 0) return;
@@ -179,7 +208,7 @@ function OrdersTab({ soundUrls }: { soundUrls: SoundUrls }) {
     });
     if (newlySeen.length > 0) {
       saveSeenNew(seenNewRef.current);
-      playNewSound();
+      void playNewSound();
     }
   }, [playNewSound]);
 
@@ -219,33 +248,20 @@ function OrdersTab({ soundUrls }: { soundUrls: SoundUrls }) {
   );
 
   useEffect(() => {
-    const audio = alarmAudioRef.current;
-    if (!audio) return;
-    if (alarmActive) {
-      if (audio.paused) {
-        void audio.play().catch(() => setSoundBlocked(true));
-      }
-    } else {
-      audio.pause();
-      audio.currentTime = 0;
+    if (!soundUrls.alarm) return;
+    if (alarmActive && audioReady) {
+      void playLoopingSound(soundUrls.alarm).then((played) => {
+        if (!played) {
+          setSoundBlocked(true);
+          setAudioReady(false);
+        }
+      });
+      return;
     }
-  }, [alarmActive]);
+    stopLoopingSound();
+  }, [alarmActive, audioReady, soundUrls.alarm]);
 
-  const unlockSound = async () => {
-    const audios = [newAudioRef.current, alarmAudioRef.current].filter(Boolean) as HTMLAudioElement[];
-    for (const audio of audios) {
-      try {
-        audio.muted = true;
-        await audio.play();
-        audio.pause();
-        audio.currentTime = 0;
-        audio.muted = false;
-      } catch {
-        audio.muted = false;
-      }
-    }
-    setSoundBlocked(false);
-  };
+  useEffect(() => () => stopLoopingSound(), []);
 
   const selectedDayKey = moscowTodayKey(dayOffset);
   const visibleOrders = orders.filter(
@@ -283,19 +299,26 @@ function OrdersTab({ soundUrls }: { soundUrls: SoundUrls }) {
 
       {soundBlocked && (
         <div className="notice warning">
-          Браузер заблокировал автозвук. Нажмите «Включить звук» или «Проверить звук» перед новым заказом.
-          <button type="button" onClick={() => void unlockSound()}>
-            Включить звук
+          Звук не активен. Нажмите «Начать смену» один раз после открытия вкладки.
+          <button type="button" onClick={() => void startShift()}>
+            Начать смену
           </button>
         </div>
       )}
       {!soundUrls.new || !soundUrls.alarm ? (
         <div className="notice">MP3 для новых заказов и тревоги можно загрузить во вкладке «Работа».</div>
-      ) : (
+      ) : audioReady ? (
         <div className="notice success sound-actions">
-          <span>Звуки загружены.</span>
+          <span>Звук включён на смену. Новые заказы будут с сигналом.</span>
           <button type="button" onClick={testNewSound}>
             Проверить звук
+          </button>
+        </div>
+      ) : (
+        <div className="notice warning sound-actions">
+          <span>Перед работой нажмите «Начать смену» — иначе браузер не даст автозвук.</span>
+          <button type="button" onClick={() => void startShift()}>
+            Начать смену
           </button>
         </div>
       )}
