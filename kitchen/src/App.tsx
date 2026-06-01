@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode } from "react";
 import { api } from "./api";
 import { loadSoundUrl, saveSound, type SoundKey } from "./audioStore";
 import type {
@@ -40,6 +40,18 @@ const TABS: Array<{ id: TabId; title: string }> = [
 type Cursor = {
   since_updated_at: number;
   since_id: number;
+};
+
+type OrderRange = {
+  min: number;
+  max: number;
+};
+
+const MENU_ORDER_RANGES: Record<string, OrderRange> = {
+  "ШАУРМА": { min: 1, max: 20 },
+  "ГРИЛЬ НА УГЛЯХ": { min: 21, max: 40 },
+  "КАРТОШКА & СНЕКИ": { min: 41, max: 60 },
+  "НАПИТКИ": { min: 61, max: 80 },
 };
 
 type SoundUrls = Record<SoundKey, string | null>;
@@ -469,6 +481,11 @@ function MenuTab() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
+  const sortedItems = useMemo(
+    () => [...items].sort((left, right) => left.sort_order - right.sort_order || left.id - right.id),
+    [items],
+  );
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -523,15 +540,36 @@ function MenuTab() {
   const submitItem = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
+    const categoryId = parseNumber(form.get("category_id"));
+    const category = categories.find((item) => item.id === categoryId);
+    const sortOrder = parseNumber(form.get("sort_order"));
+    const range = category ? menuOrderRange(category) : null;
+    if (!category || !range) {
+      setError("Для выбранной категории не настроен диапазон порядка");
+      return;
+    }
+    if (!editingItem) {
+      const used = new Set(items.filter((item) => item.category_id === categoryId).map((item) => item.sort_order));
+      const hasFreeOrder = Array.from({ length: range.max - range.min + 1 }, (_, index) => range.min + index)
+        .some((order) => !used.has(order));
+      if (!hasFreeOrder) {
+        setError("В этой категории нет свободного порядка");
+        return;
+      }
+    }
+    if (sortOrder < range.min || sortOrder > range.max) {
+      setError(`Порядок должен быть в диапазоне ${range.min}–${range.max} для категории ${category.name}`);
+      return;
+    }
     const body = {
-      category_id: parseNumber(form.get("category_id")),
+      category_id: categoryId,
       name: String(form.get("name") ?? ""),
       description: nullableText(form.get("description")),
       price: parseNumber(form.get("price")),
       weight: parseNumber(form.get("weight")),
       cooking_time: parseNumber(form.get("cooking_time")),
-      image_url: nullableText(form.get("image_url")),
-      sort_order: parseNumber(form.get("sort_order")),
+      image_url: editingItem?.image_url ?? null,
+      sort_order: sortOrder,
       is_active: form.get("is_active") === "on",
     };
     void run(async () => {
@@ -608,15 +646,19 @@ function MenuTab() {
             key={editingItem?.id ?? "new"}
             value={editingItem}
             categories={categories}
+            items={items}
             onSubmit={submitItem}
             onCancel={() => setEditingItem(null)}
           />
-          <DataTable headers={["ИД", "Категория", "Название", "Цена", "Вес", "Мин", "Активна", "Действия"]}>
-            {items.map((item) => (
+          <DataTable headers={["Порядок", "Категория", "Название / Описание", "Цена", "Вес", "Мин", "Активна", "Действия"]}>
+            {sortedItems.map((item) => (
               <tr key={item.id}>
-                <td>{item.id}</td>
+                <td>{item.sort_order}</td>
                 <td>{categoryName(categories, item.category_id)}</td>
-                <td>{item.name}</td>
+                <td>
+                  <strong>{item.name}</strong>
+                  {item.description && <pre className="description-cell">{item.description}</pre>}
+                </td>
                 <td>{formatMoney(item.price)}</td>
                 <td>{item.weight} г</td>
                 <td>{item.cooking_time}</td>
@@ -973,27 +1015,68 @@ function CategoryForm({
 function MenuItemForm({
   value,
   categories,
+  items,
   onSubmit,
   onCancel,
 }: {
   value: MenuItemDto | null;
   categories: CategoryDto[];
+  items: MenuItemDto[];
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   onCancel: () => void;
 }) {
+  const [categoryId, setCategoryId] = useState(value?.category_id ?? categories[0]?.id ?? 0);
+  const [sortOrder, setSortOrder] = useState(
+    value?.sort_order ?? nextFreeMenuSortOrder(categories.find((category) => category.id === (value?.category_id ?? categories[0]?.id)), items),
+  );
+  const selectedCategory = categories.find((category) => category.id === categoryId);
+  const selectedRange = selectedCategory ? menuOrderRange(selectedCategory) : null;
+
+  useEffect(() => {
+    if (value) {
+      setCategoryId(value.category_id);
+      setSortOrder(value.sort_order);
+      return;
+    }
+    const firstCategory = categories[0];
+    if (!firstCategory) return;
+    setCategoryId(firstCategory.id);
+    setSortOrder(nextFreeMenuSortOrder(firstCategory, items));
+  }, [categories, items, value]);
+
+  const handleCategoryChange = (event: ChangeEvent<HTMLSelectElement>) => {
+    const nextCategoryId = Number(event.currentTarget.value);
+    const nextCategory = categories.find((category) => category.id === nextCategoryId);
+    setCategoryId(nextCategoryId);
+    setSortOrder(value ? sortOrder : nextFreeMenuSortOrder(nextCategory, items));
+  };
+
   return (
     <form className="crud-form" onSubmit={onSubmit}>
-      <select name="category_id" defaultValue={value?.category_id ?? categories[0]?.id ?? ""} required>
+      <select name="category_id" value={categoryId || ""} onChange={handleCategoryChange} required>
         <option value="" disabled>Категория</option>
         {categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
       </select>
       <input name="name" placeholder="Название" defaultValue={value?.name ?? ""} required />
-      <input name="description" placeholder="Описание" defaultValue={value?.description ?? ""} />
+      <textarea name="description" placeholder="Описание: каждый ингредиент с новой строки и весом" defaultValue={value?.description ?? ""} rows={4} />
       <input name="price" type="number" placeholder="Цена" defaultValue={value?.price ?? 0} min={0} />
       <input name="weight" type="number" placeholder="Вес" defaultValue={value?.weight ?? 0} min={0} />
       <input name="cooking_time" type="number" placeholder="Минуты" defaultValue={value?.cooking_time ?? 0} min={0} />
-      <input name="image_url" placeholder="Ссылка на картинку" defaultValue={value?.image_url ?? ""} />
-      <input name="sort_order" type="number" placeholder="Порядок" defaultValue={value?.sort_order ?? 0} />
+      <input
+        name="sort_order"
+        type="number"
+        placeholder="Порядок"
+        value={sortOrder}
+        min={selectedRange?.min}
+        max={selectedRange?.max}
+        onChange={(event) => setSortOrder(Number(event.currentTarget.value))}
+        required
+      />
+      {selectedCategory && selectedRange && (
+        <small className="form-hint">
+          Диапазон для {selectedCategory.name}: {selectedRange.min}–{selectedRange.max}
+        </small>
+      )}
       <label><input name="is_active" type="checkbox" defaultChecked={value?.is_active ?? true} /> Активна</label>
       <button type="submit">{value ? "Сохранить" : "Создать"}</button>
       {value && <button type="button" onClick={onCancel}>Отмена</button>}
@@ -1055,6 +1138,29 @@ function RemovalForm({
 
 function categoryName(categories: CategoryDto[], id: number): string {
   return categories.find((category) => category.id === id)?.name ?? `#${id}`;
+}
+
+function normalizedCategoryName(category: CategoryDto): string {
+  return category.name.trim().toUpperCase();
+}
+
+function menuOrderRange(category: CategoryDto): OrderRange | null {
+  return MENU_ORDER_RANGES[normalizedCategoryName(category)] ?? null;
+}
+
+function nextFreeMenuSortOrder(category: CategoryDto | undefined, items: MenuItemDto[]): number {
+  if (!category) return 0;
+  const range = menuOrderRange(category);
+  if (!range) return 0;
+  const used = new Set(
+    items
+      .filter((item) => item.category_id === category.id)
+      .map((item) => item.sort_order),
+  );
+  for (let order = range.min; order <= range.max; order += 1) {
+    if (!used.has(order)) return order;
+  }
+  return range.min;
 }
 
 function itemName(items: MenuItemDto[], id: number): string {

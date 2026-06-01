@@ -18,7 +18,8 @@ body {
 
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
 }
 
@@ -41,12 +42,17 @@ button:disabled {
 }
 
 input,
-select {
+select,
+textarea {
   width: 100%;
   border: 1px solid #cbd5e1;
   border-radius: 10px;
   padding: 10px 12px;
   background: #ffffff;
+}
+
+textarea {
+  resize: vertical;
 }
 
 label {
@@ -376,6 +382,19 @@ th {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.description-cell {
+  margin: 6px 0 0;
+  white-space: pre-wrap;
+  color: #4b5563;
+  font: inherit;
+  font-size: 13px;
+}
+
+.form-hint {
+  color: #64748b;
+  font-size: 12px;
 }
 
 .clickable-row {
