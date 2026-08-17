@@ -1,4 +1,4 @@
 {
   "name": "shaurma-app",
-  "install": "bash .cursor/setup-ssh.sh"
+  "install": "if [ -f .cursor/setup-ssh.sh ]; then bash .cursor/setup-ssh.sh; else echo 'Repository not checked out yet; skipping SSH install.'; fi"
 }
