@@ -1,0 +1,4 @@
+{
+  "name": "shaurma-app",
+  "install": "bash .cursor/setup-ssh.sh"
+}
