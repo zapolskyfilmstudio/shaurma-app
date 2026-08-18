@@ -41,9 +41,9 @@ ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO settings (key, value, updated_at)
 VALUES
-  ('work_start_time', '00:00', 0),
-  ('cutoff_regular', '23:00', 0),
-  ('cutoff_grill', '23:00', 0)
+  ('work_start_time', '12:00', 0),
+  ('cutoff_regular', '22:45', 0),
+  ('cutoff_grill', '21:45', 0)
 ON CONFLICT (key) DO NOTHING;
 
 SELECT setval(pg_get_serial_sequence('categories', 'id'), COALESCE((SELECT max(id) FROM categories), 1), true);
