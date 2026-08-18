@@ -27,6 +27,11 @@ button,
 input,
 textarea {
   font: inherit;
+  color: inherit;
+}
+
+button {
+  background: transparent;
 }
 
 .screen {
@@ -76,12 +81,13 @@ textarea {
 }
 
 .menu-btn:disabled {
-  color: #aaa;
+  color: #fff;
+  opacity: 0.5;
   cursor: default;
 }
 
 .text-muted {
-  color: #aaa;
+  color: #fff;
 }
 
 .text-error {
@@ -93,6 +99,20 @@ textarea {
   border-radius: 12px;
   padding: 12px;
   width: 100%;
+  background: #000;
+  color: #fff;
+}
+
+button.card {
+  cursor: pointer;
+  text-align: left;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.card strong,
+.card p {
+  color: #fff;
 }
 
 .field,
@@ -126,12 +146,22 @@ textarea {
   padding-bottom: 24px;
 }
 
+.check-row input[type="checkbox"] {
+  accent-color: #fff;
+}
+
 .product-screen,
 .category-screen {
   padding: 16px 5% 24px;
   display: flex;
   flex-direction: column;
   gap: 12px;
+  color: #fff;
+}
+
+.product-screen h2,
+.category-screen h2 {
+  color: #fff;
 }
 
 .modal-backdrop {
@@ -209,23 +239,25 @@ textarea {
   display: grid;
   place-items: center;
   scroll-snap-align: center;
-  color: #666;
+  color: #fff;
+  opacity: 0.35;
   font-size: 15px;
   line-height: 1;
-  transition: color 0.1s ease, font-size 0.1s ease;
+  transition: opacity 0.1s ease, font-size 0.1s ease;
   user-select: none;
 }
 
 .wheel-item.active {
   color: #fff;
+  opacity: 1;
   font-size: 30px;
 }
 
 .spinner {
   width: 40px;
   height: 40px;
-  border: 3px solid #333;
-  border-top-color: #fff;
+  border: 3px solid #fff;
+  border-top-color: transparent;
   border-radius: 50%;
   animation: spin 1s linear infinite;
 }
