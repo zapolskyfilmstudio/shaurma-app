@@ -11,6 +11,21 @@ MVP запускается одинаково на ноутбуке и на VPS:
    - `BEARER_TOKEN`
    - `CORS_ALLOWED_ORIGINS`
    - публичные URL для Android/Kitchen сборок.
+   - `TBANK_TERMINAL_KEY`, `TBANK_PASSWORD`, `TBANK_NOTIFICATION_URL`, `TBANK_SUCCESS_URL`, `TBANK_FAIL_URL` для оплаты через T-Bank.
+
+## T-Bank
+
+1. В личном кабинете интернет-эквайринга возьмите **тестовый** терминал и пройдите тестовые платежи.
+2. Укажите в `.env`:
+   - `TBANK_TERMINAL_KEY`, `TBANK_PASSWORD`
+   - `TBANK_API_URL=https://rest-api-test.tinkoff.ru/v2` для тестов или `https://securepay.tinkoff.ru/v2` для боевого терминала
+   - `TBANK_NOTIFICATION_URL=https://<ваш-домен>/api/webhooks/tbank`
+   - `TBANK_SUCCESS_URL=https://<ваш-домен>/?payment=success`
+   - `TBANK_FAIL_URL=https://<ваш-домен>/?payment=fail`
+3. В настройках терминала T-Bank включите HTTP(S)-уведомления или передавайте `NotificationURL` в Init (backend делает это автоматически).
+4. После успешных тестов замените тестовый терминал на рабочий.
+
+Если `TBANK_*` не заданы, заказы создаются без онлайн-оплаты (удобно для локальной разработки).
 
 ## Запуск
 
