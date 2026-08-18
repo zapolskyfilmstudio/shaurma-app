@@ -78,10 +78,11 @@ export function ScreenLayout({
   onLeft,
   onRight,
   cartCount,
+  mainMenu = false,
   children,
-}: TopZoneProps & { children: ReactNode }) {
+}: TopZoneProps & { mainMenu?: boolean; children: ReactNode }) {
   return (
-    <div className="screen">
+    <div className={mainMenu ? "screen screen-main" : "screen"}>
       <TopZone
         left={left}
         right={right}
@@ -105,6 +106,7 @@ export function MenuButton({
   onClick,
   enabled = true,
   onOverflow,
+  variant = "default",
 }: {
   text: string;
   width: number;
@@ -113,12 +115,17 @@ export function MenuButton({
   onClick: () => void;
   enabled?: boolean;
   onOverflow?: () => void;
+  variant?: "default" | "nav" | "action";
 }) {
+  const variantClass =
+    variant === "nav" ? "menu-btn menu-btn--nav" : variant === "action" ? "menu-btn menu-btn--action" : "menu-btn";
+  const resolvedFontSize = variant === "default" ? fontSize * 1.5 : fontSize;
+
   return (
     <button
       type="button"
-      className="menu-btn"
-      style={{ width, height, fontSize }}
+      className={variantClass}
+      style={{ width, height, fontSize: resolvedFontSize }}
       onClick={onClick}
       disabled={!enabled}
       ref={(node) => {

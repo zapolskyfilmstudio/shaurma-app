@@ -50,7 +50,16 @@ type Route =
   | { name: "profile" }
   | { name: "payment"; result: "success" | "fail"; publicId: string };
 
-const MENU_BUTTONS = ["ШАУРМА", "ГРИЛЬ НА УГЛЯХ", "КАРТОШКА & СНЕКИ", "НАПИТКИ", "МОИ ЗАКАЗЫ"];
+const MENU_BUTTONS = [
+  "ШАУРМА",
+  "ГРИЛЬ НА УГЛЯХ",
+  "КАРТОШКА & СНЕКИ",
+  "НАПИТКИ",
+  "ДОПОЛНИТЕЛЬНО",
+  "КОМБО & АКЦИИ",
+  "ОБРАТНАЯ СВЯЗЬ",
+  "МОИ ЗАКАЗЫ",
+];
 
 function paymentStatusLabel(status: string): string {
   switch (status) {
@@ -204,7 +213,7 @@ function App() {
       <ScreenLayout topHeight={topHeight} left="home" right="cart" onLeft={goMain} onRight={goCart} cartCount={cartCount}>
         <div className="centered-column">
           <h2>{route.title}</h2>
-          <p className="text-muted">Раздел скоро появится</p>
+          <p className="text-muted">Скоро будет</p>
         </div>
       </ScreenLayout>
     );
@@ -361,7 +370,7 @@ function MainScreen({
 }) {
   const [fontSize, setFontSize] = useState(28);
   return (
-    <ScreenLayout topHeight={topHeight} left="profile" right="cart" onLeft={onProfile} onRight={onCart} cartCount={cartCount}>
+    <ScreenLayout topHeight={topHeight} left="profile" right="cart" onLeft={onProfile} onRight={onCart} cartCount={cartCount} mainMenu>
       <div className="centered-column" style={{ gap: buttonGap }}>
         {MENU_BUTTONS.map((title) => (
           <MenuButton
@@ -370,10 +379,15 @@ function MainScreen({
             width={buttonWidth}
             height={buttonHeight}
             fontSize={fontSize}
+            variant="nav"
             onOverflow={() => setFontSize((value) => value * 0.9)}
             onClick={() => {
               if (title === "МОИ ЗАКАЗЫ") {
                 onOrders();
+                return;
+              }
+              if (title === "КОМБО & АКЦИИ" || title === "ОБРАТНАЯ СВЯЗЬ") {
+                onMissing(title);
                 return;
               }
               const category = findCategoryByTitle(title);
@@ -691,6 +705,7 @@ function CartScreen({
                 width={contentWidth * 0.42}
                 height={buttonHeight}
                 fontSize={fontSize}
+                variant="action"
                 onOverflow={() => setFontSize((value) => value * 0.9)}
                 onClick={() => onEdit(item.menuItemId)}
               />
@@ -699,6 +714,7 @@ function CartScreen({
                 width={contentWidth * 0.42}
                 height={buttonHeight}
                 fontSize={fontSize}
+                variant="action"
                 onClick={() => onCartChange(cart.filter((entry) => entry.id !== item.id))}
               />
             </div>
@@ -774,12 +790,13 @@ function CartScreen({
             Онлайн-оплата временно недоступна — администратор должен настроить T-Bank на сервере.
           </p>
         )}
-        <MenuButton text="Добавить к заказу" width={buttonWidth} height={buttonHeight} fontSize={fontSize} onClick={onHome} />
+        <MenuButton text="Добавить к заказу" width={buttonWidth} height={buttonHeight} fontSize={fontSize} variant="action" onClick={onHome} />
         <MenuButton
           text={submitting ? "Оформляем..." : "Оформить заказ"}
           width={buttonWidth}
           height={buttonHeight}
           fontSize={fontSize}
+          variant="action"
           enabled={isTimeValid && !submitting && paymentEnabled}
           onClick={() => void submit()}
         />
@@ -1079,6 +1096,7 @@ function ProfileScreen({
           width={buttonWidth}
           height={buttonHeight}
           fontSize={fontSize}
+          variant="action"
           onOverflow={() => setFontSize((value) => value * 0.9)}
           enabled={!saving}
           onClick={() => void save()}
