@@ -67,8 +67,8 @@ function App() {
   const [categories, setCategories] = useState<CategoryDto[]>([]);
   const [cart, setCart] = useState<CartItem[]>(loadCart());
   const [orders, setOrders] = useState<OrderDto[]>([]);
-  const [workStart, setWorkStart] = useState("12:00");
-  const [cutoff, setCutoff] = useState("22:00");
+  const [workStart, setWorkStart] = useState("00:00");
+  const [cutoff, setCutoff] = useState("23:00");
   const [isOpen, setIsOpen] = useState(true);
   const [serverOffset, setServerOffset] = useState(profile?.serverTimeOffsetMs ?? 0);
 

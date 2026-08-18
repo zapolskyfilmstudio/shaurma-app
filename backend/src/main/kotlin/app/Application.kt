@@ -1484,9 +1484,9 @@ private fun readSettings(connection: Connection): Settings {
         }
     }
     return Settings(
-        workStart = LocalTime.parse(values["work_start_time"] ?: "12:00"),
-        cutoffRegular = LocalTime.parse(values["cutoff_regular"] ?: "22:45"),
-        cutoffGrill = LocalTime.parse(values["cutoff_grill"] ?: "21:45"),
+        workStart = LocalTime.parse(values["work_start_time"] ?: "00:00"),
+        cutoffRegular = LocalTime.parse(values["cutoff_regular"] ?: "23:00"),
+        cutoffGrill = LocalTime.parse(values["cutoff_grill"] ?: "23:00"),
     )
 }
 
