@@ -1,10 +1,14 @@
-INSERT INTO categories (id, name, sort_order, is_active, is_grill)
-VALUES
-  (1, 'Шаурма', 10, true, false),
-  (2, 'Гриль', 20, true, true),
-  (3, 'Напитки', 30, true, false),
-  (4, 'Соусы', 40, true, false)
-ON CONFLICT (id) DO NOTHING;
+UPDATE menu_items
+SET is_active = false, updated_at = EXTRACT(EPOCH FROM NOW())::BIGINT * 1000
+WHERE id IN (101, 102, 103, 104);
+
+UPDATE additions
+SET is_active = false
+WHERE menu_item_id IN (101, 102, 103, 104);
+
+UPDATE removals
+SET is_active = false
+WHERE menu_item_id IN (101, 102, 103, 104);
 
 INSERT INTO menu_items (id, category_id, name, description, price, weight, cooking_time, image_url, sort_order, is_active, created_at, updated_at)
 VALUES
@@ -23,19 +27,16 @@ VALUES
   (123, 1, 'Шаурма на тар с фри', null, 459, 0, 0, null, 130, true, 0, 0),
   (124, 1, 'Шаурма на тар с картофелем', null, 479, 0, 0, null, 140, true, 0, 0),
   (125, 1, 'Шаурма на тар большая с фри', null, 519, 0, 0, null, 150, true, 0, 0),
-  (126, 1, 'Шаурма на тар большая с картофелем', null, 549, 0, 0, null, 160, true, 0, 0),
-  (201, 2, 'Курица гриль', 'Курица гриль, специи, соус', 600, 900, 60, null, 10, true, 0, 0),
-  (301, 3, 'Морс', 'Домашний морс', 120, 500, 2, null, 10, true, 0, 0),
-  (302, 3, 'Вода', 'Вода без газа', 80, 500, 1, null, 20, true, 0, 0),
-  (401, 4, 'Соус чесночный', 'Порция соуса', 50, 50, 1, null, 10, true, 0, 0)
-ON CONFLICT (id) DO NOTHING;
+  (126, 1, 'Шаурма на тар большая с картофелем', null, 549, 0, 0, null, 160, true, 0, 0)
+ON CONFLICT (id) DO UPDATE SET
+  category_id = EXCLUDED.category_id,
+  name = EXCLUDED.name,
+  description = EXCLUDED.description,
+  price = EXCLUDED.price,
+  weight = EXCLUDED.weight,
+  cooking_time = EXCLUDED.cooking_time,
+  sort_order = EXCLUDED.sort_order,
+  is_active = EXCLUDED.is_active,
+  updated_at = EXTRACT(EPOCH FROM NOW())::BIGINT * 1000;
 
-INSERT INTO settings (key, value, updated_at)
-VALUES
-  ('work_start_time', '00:00', 0),
-  ('cutoff_regular', '23:00', 0),
-  ('cutoff_grill', '23:00', 0)
-ON CONFLICT (key) DO NOTHING;
-
-SELECT setval(pg_get_serial_sequence('categories', 'id'), COALESCE((SELECT max(id) FROM categories), 1), true);
 SELECT setval(pg_get_serial_sequence('menu_items', 'id'), COALESCE((SELECT max(id) FROM menu_items), 1), true);
