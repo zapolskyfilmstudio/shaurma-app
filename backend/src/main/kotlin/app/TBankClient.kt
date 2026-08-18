@@ -110,7 +110,7 @@ class TBankClient(val config: TBankConfig) {
 
         val responseText = http.post("${config.apiUrl.trimEnd('/')}/Init") {
             contentType(ContentType.Application.Json)
-            setBody(json.encodeToString(body))
+            setBody(body.toString())
         }.bodyAsText()
 
         val response = json.parseToJsonElement(responseText).jsonObject
