@@ -63,7 +63,7 @@ data class TBankNotification(
     val raw: JsonObject,
 )
 
-class TBankClient(private val config: TBankConfig) {
+class TBankClient(val config: TBankConfig) {
     private val json = Json {
         ignoreUnknownKeys = true
         explicitNulls = false
