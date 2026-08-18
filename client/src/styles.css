@@ -1,0 +1,282 @@
+@font-face {
+  font-family: "MT Corsiva";
+  src: url("/fonts/mtcorsva.ttf") format("truetype");
+  font-display: swap;
+}
+
+:root {
+  color-scheme: dark;
+  font-family: "MT Corsiva", cursive, serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  min-height: 100%;
+  height: 100%;
+  background: #000;
+  color: #fff;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  background: transparent;
+}
+
+.screen {
+  min-height: 100dvh;
+  background: #000;
+  display: flex;
+  flex-direction: column;
+}
+
+.top-zone {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #000;
+  flex-shrink: 0;
+}
+
+.icon-btn {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+}
+
+.content-zone {
+  overflow: auto;
+}
+
+.centered-column {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 100%;
+  gap: var(--gap, 12px);
+  padding: 0 10%;
+}
+
+.menu-btn {
+  border: 2px solid #fff;
+  border-radius: 12px;
+  background: #000;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.menu-btn:disabled {
+  color: #fff;
+  opacity: 0.5;
+  cursor: default;
+}
+
+.text-muted {
+  color: #fff;
+}
+
+.text-error {
+  color: #f44;
+}
+
+.card {
+  border: 2px solid #fff;
+  border-radius: 12px;
+  padding: 12px;
+  width: 100%;
+  background: #000;
+  color: #fff;
+}
+
+button.card {
+  cursor: pointer;
+  text-align: left;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.card strong,
+.card p {
+  color: #fff;
+}
+
+.field,
+.textarea {
+  width: 100%;
+  border: 2px solid #fff;
+  border-radius: 12px;
+  background: #000;
+  color: #fff;
+  padding: 10px 12px;
+}
+
+.textarea {
+  resize: none;
+  min-height: 80px;
+}
+
+.row-buttons {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  width: 100%;
+}
+
+.list-screen {
+  padding: 0 5%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 24px;
+}
+
+.check-row input[type="checkbox"] {
+  accent-color: #fff;
+}
+
+.product-screen,
+.category-screen {
+  padding: 16px 5% 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  color: #fff;
+}
+
+.product-screen h2,
+.category-screen h2 {
+  color: #fff;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.75);
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  z-index: 20;
+}
+
+.modal {
+  width: min(100%, 420px);
+  max-height: 80dvh;
+  overflow: auto;
+  background: #000;
+  border: 2px solid #fff;
+  border-radius: 12px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.check-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+}
+
+.wheel-row {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.wheel {
+  border: 2px solid #fff;
+  border-radius: 12px;
+  overflow: hidden;
+  position: relative;
+  flex-shrink: 0;
+}
+
+.wheel-frame {
+  position: absolute;
+  left: 6%;
+  right: 6%;
+  top: 33.33%;
+  height: 33.33%;
+  border-top: 2px solid #fff;
+  border-bottom: 2px solid #fff;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.wheel-list {
+  height: 100%;
+  overflow-y: auto;
+  scroll-snap-type: y mandatory;
+  scrollbar-width: none;
+  position: relative;
+  z-index: 1;
+}
+
+.wheel-list::-webkit-scrollbar {
+  display: none;
+}
+
+.wheel-item {
+  display: grid;
+  place-items: center;
+  scroll-snap-align: center;
+  color: #fff;
+  opacity: 0.35;
+  font-size: 15px;
+  line-height: 1;
+  transition: opacity 0.1s ease, font-size 0.1s ease;
+  user-select: none;
+}
+
+.wheel-item.active {
+  color: #fff;
+  opacity: 1;
+  font-size: 30px;
+}
+
+.spinner {
+  width: 40px;
+  height: 40px;
+  border: 3px solid #fff;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.wheel-separator {
+  font-size: 28px;
+  line-height: 1;
+  padding: 0 2px;
+}
+
+.closed-banner {
+  text-align: center;
+  color: #fff;
+  font-size: 22px;
+  padding: 16px;
+}

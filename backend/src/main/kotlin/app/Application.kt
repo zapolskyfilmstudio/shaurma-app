@@ -26,6 +26,7 @@ import io.ktor.server.plugins.statuspages.StatusPages
 import io.ktor.server.request.path
 import io.ktor.server.request.receive
 import io.ktor.server.response.respond
+import io.ktor.server.response.respondText
 import io.ktor.server.routing.Route
 import io.ktor.server.routing.delete
 import io.ktor.server.routing.get
@@ -45,6 +46,8 @@ import kotlinx.serialization.json.contentOrNull
 import org.flywaydb.core.Flyway
 import org.jetbrains.exposed.sql.Database
 import org.postgresql.util.PGobject
+import org.slf4j.LoggerFactory
+import java.net.IDN
 import java.net.URI
 import java.sql.Connection
 import java.sql.PreparedStatement
@@ -60,6 +63,20 @@ import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.max
 
 private val MoscowZone: ZoneId = ZoneId.of("Europe/Moscow")
+private val paymentLogger = LoggerFactory.getLogger("app.payment")
+
+private fun expandCorsOrigins(origins: List<String>): List<String> =
+    origins.flatMap { origin ->
+        if (origin == "*") return@flatMap listOf(origin)
+        runCatching {
+            val uri = URI(origin)
+            val host = uri.host ?: return@flatMap listOf(origin)
+            val port = if (uri.port > 0) ":${uri.port}" else ""
+            val scheme = uri.scheme
+            val hosts = linkedSetOf(host, IDN.toASCII(host, IDN.ALLOW_UNASSIGNED), IDN.toUnicode(host))
+            hosts.map { h -> "$scheme://$h$port" }
+        }.getOrElse { listOf(origin) }
+    }.distinct()
 
 private val appJson = Json {
     ignoreUnknownKeys = true
@@ -79,6 +96,7 @@ fun main() {
 fun Application.module(
     config: AppConfig = AppConfig.fromEnv(),
     database: AppDatabase = AppDatabase(config),
+    tbankClient: TBankClient = TBankClient(TBankConfig.fromEnv()),
 ) {
     val appLog = environment.log
     install(SimpleRateLimitPlugin)
@@ -110,7 +128,7 @@ fun Application.module(
         allowHeader(HttpHeaders.Authorization)
         allowHeader(HttpHeaders.ContentType)
         allowHeader("X-Device-Id")
-        config.corsAllowedOrigins.forEach { origin ->
+        expandCorsOrigins(config.corsAllowedOrigins).forEach { origin ->
             if (origin == "*") {
                 anyHost()
             } else {
@@ -130,9 +148,8 @@ fun Application.module(
 
     routing {
         route("/api") {
-            publicRoutes(database)
+            publicRoutes(config, database, tbankClient)
             authenticate("api-bearer") {
-                androidRoutes(database)
                 kitchenRoutes(database)
                 adminRoutes(database)
             }
@@ -147,6 +164,7 @@ data class AppConfig(
     val bearerToken: String,
     val serverPort: Int,
     val corsAllowedOrigins: List<String>,
+    val paymentSkip: Boolean,
 ) {
     companion object {
         fun fromEnv(): AppConfig = AppConfig(
@@ -159,6 +177,7 @@ data class AppConfig(
                 .split(",")
                 .map { it.trim() }
                 .filter { it.isNotEmpty() },
+            paymentSkip = env("PAYMENT_SKIP", "false").equals("true", ignoreCase = true),
         )
 
         private fun env(name: String, default: String): String = System.getenv(name)?.takeIf { it.isNotBlank() } ?: default
@@ -220,12 +239,20 @@ class ApiException(
     val serverTime: Long,
 )
 @Serializable data class MenuResponse(val serverTime: Long, val categories: List<CategoryDto>)
+@Serializable data class PublicConfigResponse(
+    val serverTime: Long,
+    val workStartTime: String,
+    val cutoffTime: String,
+    val isOpen: Boolean,
+    val paymentEnabled: Boolean,
+)
 @Serializable data class CategoryDto(
     val id: Long,
     val name: String,
     val sortOrder: Int,
     val isActive: Boolean,
     val isGrill: Boolean,
+    val defaultCookingMinutes: Int = 15,
     val items: List<MenuItemDto> = emptyList(),
 )
 @Serializable data class MenuItemDto(
@@ -266,7 +293,19 @@ class ApiException(
     val additionsIds: List<Long> = emptyList(),
     val removalsIds: List<Long> = emptyList(),
 )
-@Serializable data class CreateOrderResponse(val publicId: String, val status: String, val updatedAt: Long)
+@Serializable data class CreateOrderResponse(
+    val publicId: String,
+    val status: String,
+    val updatedAt: Long,
+    val paymentStatus: String,
+    val paymentUrl: String? = null,
+)
+
+@Serializable data class PaymentStatusResponse(
+    val publicId: String,
+    val paymentStatus: String,
+    val status: String,
+)
 @Serializable data class OrdersResponse(val orders: List<OrderDto>)
 @Serializable data class KitchenOrdersResponse(val orders: List<KitchenOrderDto>)
 @Serializable data class OrderDto(
@@ -326,6 +365,7 @@ class ApiException(
     val sortOrder: Int = 0,
     val isActive: Boolean = true,
     val isGrill: Boolean = false,
+    val defaultCookingMinutes: Int = 15,
 )
 @Serializable data class MenuItemUpsert(
     val categoryId: Long,
@@ -380,6 +420,9 @@ private data class OrderRow(
     val publicId: String,
     val deviceId: UUID,
     val status: String,
+    val paymentStatus: String,
+    val tbankPaymentId: Long?,
+    val paidAt: Long?,
     val createdAt: Long,
     val updatedAt: Long,
     val requestedTime: Long,
@@ -387,6 +430,13 @@ private data class OrderRow(
     val totalPrice: Int,
     val generalComment: String?,
     val client: ClientDto? = null,
+)
+
+private data class CreatedOrder(
+    val id: Long,
+    val publicId: String,
+    val totalPrice: Int,
+    val updatedAt: Long,
 )
 
 private data class Settings(val workStart: LocalTime, val cutoffRegular: LocalTime, val cutoffGrill: LocalTime)
@@ -432,15 +482,13 @@ private val SimpleRateLimitPlugin = createApplicationPlugin(name = "SimpleRateLi
     }
 }
 
-private fun Route.publicRoutes(database: AppDatabase) {
+private fun Route.publicRoutes(config: AppConfig, database: AppDatabase, tbankClient: TBankClient) {
     post("/init") {
         val request = call.receive<InitRequest>()
-        if (request.platform != "android") {
-            throw ApiException(HttpStatusCode.BadRequest, "INVALID_PLATFORM", "Only android platform is supported")
-        }
+        val platform = parseClientPlatform(request.platform)
         val deviceId = parseUuid(request.deviceId)
         val response = database.transaction { connection, now ->
-            val device = findOrCreateAndroidDevice(connection, deviceId, now)
+            val device = findOrCreateDevice(connection, deviceId, platform, now)
             device.toInitResponse(now)
         }
         call.respond(response)
@@ -452,9 +500,23 @@ private fun Route.publicRoutes(database: AppDatabase) {
         }
         call.respond(response)
     }
-}
 
-private fun Route.androidRoutes(database: AppDatabase) {
+    get("/config") {
+        val response = database.read { connection ->
+            val now = serverNow(connection)
+            val settings = readSettings(connection)
+            val nowTime = Instant.ofEpochMilli(now).atZone(MoscowZone).toLocalTime()
+            PublicConfigResponse(
+                serverTime = now,
+                workStartTime = settings.workStart.toString(),
+                cutoffTime = settings.cutoffRegular.toString(),
+                isOpen = !nowTime.isBefore(settings.workStart) && !nowTime.isAfter(settings.cutoffRegular),
+                paymentEnabled = tbankClient.config.enabled,
+            )
+        }
+        call.respond(response)
+    }
+
     post("/profile") {
         val body = call.receive<JsonObject>()
         val response = database.transaction { connection, now ->
@@ -483,11 +545,94 @@ private fun Route.androidRoutes(database: AppDatabase) {
     }
 
     post("/order") {
+        if (!tbankClient.config.enabled && !config.paymentSkip) {
+            throw ApiException(
+                HttpStatusCode.ServiceUnavailable,
+                "PAYMENT_NOT_CONFIGURED",
+                "Онлайн-оплата не настроена. Укажите TBANK_TERMINAL_KEY и TBANK_PASSWORD в .env и перезапустите backend.",
+            )
+        }
         val request = call.receive<CreateOrderRequest>()
-        val response = database.transaction { connection, now ->
-            createOrder(connection, call.deviceIdHeader(), request, now)
+        val deviceId = call.deviceIdHeader()
+        val paymentRequired = tbankClient.config.enabled
+        val created = database.transaction { connection, now ->
+            createOrderDraft(connection, deviceId, request, now, paymentRequired)
+        }
+        val payment = initiateOrderPayment(config, tbankClient, database, created)
+        call.respond(
+            CreateOrderResponse(
+                publicId = created.publicId,
+                status = "NEW",
+                updatedAt = payment.updatedAt,
+                paymentStatus = payment.paymentStatus,
+                paymentUrl = payment.paymentUrl,
+            )
+        )
+    }
+
+    get("/order/{public_id}/payment") {
+        val publicId = call.parameters["public_id"]
+            ?: throw ApiException(HttpStatusCode.BadRequest, "BAD_REQUEST", "public_id is required")
+        val deviceId = call.deviceIdHeader()
+        val response = database.read { connection ->
+            val order = findOrderByPublicId(connection, publicId)
+                ?: throw ApiException(HttpStatusCode.NotFound, "ORDER_NOT_FOUND", "Order not found")
+            if (order.deviceId != deviceId) {
+                throw ApiException(HttpStatusCode.Forbidden, "ORDER_FORBIDDEN", "Order does not belong to this device")
+            }
+            PaymentStatusResponse(
+                publicId = order.publicId,
+                paymentStatus = order.paymentStatus,
+                status = order.status,
+            )
         }
         call.respond(response)
+    }
+
+    post("/order/{public_id}/pay") {
+        val publicId = call.parameters["public_id"]
+            ?: throw ApiException(HttpStatusCode.BadRequest, "BAD_REQUEST", "public_id is required")
+        val deviceId = call.deviceIdHeader()
+        val created = database.read { connection ->
+            val order = findOrderByPublicId(connection, publicId)
+                ?: throw ApiException(HttpStatusCode.NotFound, "ORDER_NOT_FOUND", "Order not found")
+            if (order.deviceId != deviceId) {
+                throw ApiException(HttpStatusCode.Forbidden, "ORDER_FORBIDDEN", "Order does not belong to this device")
+            }
+            if (order.paymentStatus == "PAID") {
+                throw ApiException(HttpStatusCode.BadRequest, "ALREADY_PAID", "Order is already paid")
+            }
+            CreatedOrder(
+                id = order.id,
+                publicId = order.publicId,
+                totalPrice = order.totalPrice,
+                updatedAt = order.updatedAt,
+            )
+        }
+        if (!tbankClient.config.enabled && !config.paymentSkip) {
+            throw ApiException(
+                HttpStatusCode.ServiceUnavailable,
+                "PAYMENT_NOT_CONFIGURED",
+                "Онлайн-оплата не настроена. Укажите TBANK_TERMINAL_KEY и TBANK_PASSWORD в .env и перезапустите backend.",
+            )
+        }
+        val payment = initiateOrderPayment(config, tbankClient, database, created)
+        call.respond(
+            CreateOrderResponse(
+                publicId = created.publicId,
+                status = "NEW",
+                updatedAt = payment.updatedAt,
+                paymentStatus = payment.paymentStatus,
+                paymentUrl = payment.paymentUrl,
+            )
+        )
+    }
+
+    post("/webhooks/tbank") {
+        val body = call.receive<JsonObject>()
+        val notification = tbankClient.parseNotification(body)
+        handleTBankNotification(tbankClient, database, notification)
+        call.respondText("OK")
     }
 
     get("/orders/my") {
@@ -672,7 +817,21 @@ private fun Route.adminRoutes(database: AppDatabase) {
     }
 }
 
-private fun findOrCreateAndroidDevice(connection: Connection, deviceId: UUID, now: Long): DeviceRow {
+private val supportedClientPlatforms = setOf("android", "ios", "web")
+
+private fun parseClientPlatform(value: String): String {
+    val platform = value.trim().lowercase()
+    if (platform !in supportedClientPlatforms) {
+        throw ApiException(
+            HttpStatusCode.BadRequest,
+            "INVALID_PLATFORM",
+            "Platform must be one of: ${supportedClientPlatforms.joinToString(", ")}",
+        )
+    }
+    return platform
+}
+
+private fun findOrCreateDevice(connection: Connection, deviceId: UUID, platform: String, now: Long): DeviceRow {
     findDevice(connection, deviceId)?.let { return it }
     connection.createStatement().use { it.execute("LOCK TABLE devices IN EXCLUSIVE MODE") }
     findDevice(connection, deviceId)?.let { return it }
@@ -685,24 +844,31 @@ private fun findOrCreateAndroidDevice(connection: Connection, deviceId: UUID, no
         }
     }
     if (nextNumber > 59999) {
-        throw ApiException(HttpStatusCode.Conflict, "CLIENT_NUMBER_EXHAUSTED", "Android client number range is exhausted")
+        throw ApiException(HttpStatusCode.Conflict, "CLIENT_NUMBER_EXHAUSTED", "Client number range is exhausted")
     }
     connection.prepareStatement(
         """
         INSERT INTO devices (device_id, platform, client_number, is_blocked, created_at, updated_at)
-        VALUES (?, 'android', ?, false, ?, ?)
+        VALUES (?, ?, ?, false, ?, ?)
         """.trimIndent()
     ).use { statement ->
         statement.setObject(1, deviceId)
-        statement.setInt(2, nextNumber)
-        statement.setLong(3, now)
+        statement.setString(2, platform)
+        statement.setInt(3, nextNumber)
         statement.setLong(4, now)
+        statement.setLong(5, now)
         statement.executeUpdate()
     }
     return requireDevice(connection, deviceId)
 }
 
-private fun createOrder(connection: Connection, deviceId: UUID, request: CreateOrderRequest, now: Long): CreateOrderResponse {
+private fun createOrderDraft(
+    connection: Connection,
+    deviceId: UUID,
+    request: CreateOrderRequest,
+    now: Long,
+    paymentRequired: Boolean,
+): CreatedOrder {
     val device = requireDevice(connection, deviceId)
     if (device.isBlocked) throw ApiException(HttpStatusCode.Forbidden, "DEVICE_BLOCKED", "Device is blocked")
     if (request.items.isEmpty() || request.items.size > 50) {
@@ -734,11 +900,21 @@ private fun createOrder(connection: Connection, deviceId: UUID, request: CreateO
         if (publicIdExists(connection, publicId)) return@repeat
         val savepoint = connection.setSavepoint("public_id_attempt")
         try {
-            val orderId = insertOrder(connection, publicId, device.deviceId, request, cookingStartTime, totalPrice, now)
+            val orderId = insertOrder(
+                connection,
+                publicId,
+                device.deviceId,
+                request,
+                cookingStartTime,
+                totalPrice,
+                now,
+                paymentStatus = if (paymentRequired) "WAITING" else "PAID",
+                paidAt = if (paymentRequired) null else now,
+            )
             builtItems.forEach { insertOrderItem(connection, orderId, it) }
             insertStatusHistory(connection, orderId, null, "NEW", "system", now)
             connection.releaseSavepoint(savepoint)
-            return CreateOrderResponse(publicId = publicId, status = "NEW", updatedAt = now)
+            return CreatedOrder(id = orderId, publicId = publicId, totalPrice = totalPrice, updatedAt = now)
         } catch (error: SQLException) {
             connection.rollback(savepoint)
             if (error.sqlState != "23505") throw error
@@ -746,6 +922,186 @@ private fun createOrder(connection: Connection, deviceId: UUID, request: CreateO
     }
     throw ApiException(HttpStatusCode.Conflict, "PUBLIC_ID_CONFLICT", "Could not allocate public order id")
 }
+
+private data class OrderPaymentResult(
+    val paymentStatus: String,
+    val paymentUrl: String?,
+    val updatedAt: Long,
+)
+
+private suspend fun initiateOrderPayment(
+    config: AppConfig,
+    tbankClient: TBankClient,
+    database: AppDatabase,
+    created: CreatedOrder,
+): OrderPaymentResult {
+    if (!tbankClient.config.enabled) {
+        if (!config.paymentSkip) {
+            throw ApiException(
+                HttpStatusCode.ServiceUnavailable,
+                "PAYMENT_NOT_CONFIGURED",
+                "Онлайн-оплата не настроена. Укажите TBANK_TERMINAL_KEY и TBANK_PASSWORD в .env и перезапустите backend.",
+            )
+        }
+        return OrderPaymentResult(paymentStatus = "PAID", paymentUrl = null, updatedAt = created.updatedAt)
+    }
+    val description = "Заказ ${created.publicId} МегаШаверма"
+    val initResult = try {
+        tbankClient.initPayment(
+            orderId = created.publicId,
+            amountRubles = created.totalPrice,
+            description = description,
+        )
+    } catch (error: Throwable) {
+        database.transaction { connection, now ->
+            markOrderPaymentFailed(connection, created.id, null, now)
+        }
+        throw error
+    }
+    val updatedAt = database.transaction { connection, now ->
+        connection.prepareStatement(
+            "UPDATE orders SET tbank_payment_id = ?, updated_at = ? WHERE id = ?"
+        ).use { statement ->
+            statement.setLong(1, initResult.paymentId)
+            statement.setLong(2, now)
+            statement.setLong(3, created.id)
+            statement.executeUpdate()
+        }
+        now
+    }
+    return OrderPaymentResult(
+        paymentStatus = "WAITING",
+        paymentUrl = initResult.paymentUrl,
+        updatedAt = updatedAt,
+    )
+}
+
+private suspend fun handleTBankNotification(
+    tbankClient: TBankClient,
+    database: AppDatabase,
+    notification: TBankNotification,
+) {
+    if (notification.orderId.isBlank()) return
+    paymentLogger.info(
+        "T-Bank webhook orderId={} status={} success={} paymentId={} errorCode={}",
+        notification.orderId,
+        notification.status,
+        notification.success,
+        notification.paymentId,
+        notification.errorCode,
+    )
+
+    val order = database.read { connection ->
+        findOrderByPublicId(connection, notification.orderId)
+    } ?: run {
+        paymentLogger.warn("T-Bank webhook ignored: order {} not found", notification.orderId)
+        return
+    }
+
+    when {
+        shouldConfirmPayment(notification) -> {
+            val paymentId = notification.paymentId ?: order.tbankPaymentId
+            if (paymentId == null) {
+                paymentLogger.warn(
+                    "T-Bank webhook ignored: no paymentId for order {}",
+                    notification.orderId,
+                )
+                return
+            }
+            val expectedAmountKopecks = order.totalPrice.toLong() * 100
+            if (notification.amount != null && notification.amount != expectedAmountKopecks) {
+                paymentLogger.warn(
+                    "T-Bank webhook ignored: amount mismatch for order {} (expected={}, got={})",
+                    notification.orderId,
+                    expectedAmountKopecks,
+                    notification.amount,
+                )
+                return
+            }
+
+            val paymentState = try {
+                tbankClient.getPaymentState(paymentId)
+            } catch (error: Throwable) {
+                paymentLogger.error(
+                    "T-Bank GetState failed for order {} paymentId={}: {}",
+                    notification.orderId,
+                    paymentId,
+                    error.message,
+                )
+                return
+            }
+
+            if (!tbankClient.isSuccessfulPayment(paymentState, order.publicId, expectedAmountKopecks)) {
+                paymentLogger.warn(
+                    "T-Bank payment not confirmed for order {}: status={} success={} errorCode={} amount={}",
+                    notification.orderId,
+                    paymentState.status,
+                    paymentState.success,
+                    paymentState.errorCode,
+                    paymentState.amount,
+                )
+                return
+            }
+
+            database.transaction { connection, now ->
+                markOrderPaid(connection, order.id, paymentId, now)
+            }
+            paymentLogger.info("Order {} marked PAID after GetState verification", notification.orderId)
+        }
+        shouldFailPayment(notification) -> {
+            database.transaction { connection, now ->
+                markOrderPaymentFailed(connection, order.id, notification.paymentId, now)
+            }
+            paymentLogger.info("Order {} marked FAILED from webhook status {}", notification.orderId, notification.status)
+        }
+    }
+}
+
+private fun shouldConfirmPayment(notification: TBankNotification): Boolean =
+    notification.status.uppercase() == "CONFIRMED" &&
+        notification.success &&
+        TBankClient.isSuccessfulErrorCode(notification.errorCode)
+
+private fun shouldFailPayment(notification: TBankNotification): Boolean =
+    TBankClient.isFailedPaymentStatus(notification.status)
+
+
+private fun markOrderPaid(connection: Connection, orderId: Long, paymentId: Long?, now: Long) {
+    connection.prepareStatement(
+        """
+        UPDATE orders
+        SET payment_status = 'PAID', paid_at = ?, tbank_payment_id = COALESCE(?, tbank_payment_id), updated_at = ?
+        WHERE id = ? AND payment_status <> 'PAID'
+        """.trimIndent()
+    ).use { statement ->
+        statement.setLong(1, now)
+        if (paymentId == null) statement.setNull(2, Types.BIGINT) else statement.setLong(2, paymentId)
+        statement.setLong(3, now)
+        statement.setLong(4, orderId)
+        statement.executeUpdate()
+    }
+}
+
+private fun markOrderPaymentFailed(connection: Connection, orderId: Long, paymentId: Long?, now: Long) {
+    connection.prepareStatement(
+        """
+        UPDATE orders
+        SET payment_status = 'FAILED', tbank_payment_id = COALESCE(?, tbank_payment_id), updated_at = ?
+        WHERE id = ? AND payment_status = 'WAITING'
+        """.trimIndent()
+    ).use { statement ->
+        if (paymentId == null) statement.setNull(1, Types.BIGINT) else statement.setLong(1, paymentId)
+        statement.setLong(2, now)
+        statement.setLong(3, orderId)
+        statement.executeUpdate()
+    }
+}
+
+private fun findOrderByPublicId(connection: Connection, publicId: String): OrderRow? =
+    connection.prepareStatement("SELECT * FROM orders WHERE public_id = ?").use { statement ->
+        statement.setString(1, publicId)
+        statement.executeQuery().use { result -> if (result.next()) result.toOrderRow() else null }
+    }
 
 private fun buildOrderItem(connection: Connection, request: CreateOrderItemRequest): BuiltOrderItem {
     val item = findActiveMenuItem(connection, request.menuItemId)
@@ -770,16 +1126,15 @@ private fun buildOrderItem(connection: Connection, request: CreateOrderItemReque
     )
 }
 
-private fun validateRequestedTime(requestedTime: Long, now: Long, settings: Settings, hasGrill: Boolean) {
+private fun validateRequestedTime(requestedTime: Long, now: Long, settings: Settings, @Suppress("UNUSED_PARAMETER") hasGrill: Boolean) {
     val requested = Instant.ofEpochMilli(requestedTime).atZone(MoscowZone)
     val today = Instant.ofEpochMilli(now).atZone(MoscowZone).toLocalDate()
     val requestedDate = requested.toLocalDate()
     if (requestedDate.isBefore(today) || requestedDate.isAfter(today.plusDays(3))) {
         throw ApiException(HttpStatusCode.BadRequest, "INVALID_REQUESTED_TIME", "Requested date must be from today to today+3")
     }
-    val cutoff = if (hasGrill) settings.cutoffGrill else settings.cutoffRegular
     val requestedLocalTime = requested.toLocalTime()
-    if (requestedLocalTime.isBefore(settings.workStart) || requestedLocalTime.isAfter(cutoff)) {
+    if (requestedLocalTime.isBefore(settings.workStart) || requestedLocalTime.isAfter(settings.cutoffRegular)) {
         throw ApiException(HttpStatusCode.BadRequest, "INVALID_REQUESTED_TIME", "Requested time must be between work_start_time and cutoff")
     }
 }
@@ -840,25 +1195,29 @@ private fun insertOrder(
     cookingStartTime: Long,
     totalPrice: Int,
     now: Long,
+    paymentStatus: String,
+    paidAt: Long?,
 ): Long {
     return connection.prepareStatement(
         """
         INSERT INTO orders (
-            public_id, device_id, status, created_at, updated_at, requested_time,
+            public_id, device_id, status, payment_status, paid_at, created_at, updated_at, requested_time,
             cooking_start_time, total_price, general_comment
         )
-        VALUES (?, ?, 'NEW', ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, 'NEW', ?, ?, ?, ?, ?, ?, ?, ?)
         RETURNING id
         """.trimIndent()
     ).use { statement ->
         statement.setString(1, publicId)
         statement.setObject(2, deviceId)
-        statement.setLong(3, now)
-        statement.setLong(4, now)
-        statement.setLong(5, request.requestedTime)
-        statement.setLong(6, cookingStartTime)
-        statement.setInt(7, totalPrice)
-        statement.setNullableString(8, request.generalComment?.trim()?.takeIf { it.isNotEmpty() })
+        statement.setString(3, paymentStatus)
+        if (paidAt == null) statement.setNull(4, Types.BIGINT) else statement.setLong(4, paidAt)
+        statement.setLong(5, now)
+        statement.setLong(6, now)
+        statement.setLong(7, request.requestedTime)
+        statement.setLong(8, cookingStartTime)
+        statement.setInt(9, totalPrice)
+        statement.setNullableString(10, request.generalComment?.trim()?.takeIf { it.isNotEmpty() })
         statement.executeQuery().use { result ->
             result.next()
             result.getLong(1)
@@ -893,6 +1252,9 @@ private fun updateOrderStatus(connection: Connection, publicId: String, targetSt
         statement.setString(1, publicId)
         statement.executeQuery().use { result -> if (result.next()) result.toOrderRow() else null }
     } ?: throw ApiException(HttpStatusCode.NotFound, "ORDER_NOT_FOUND", "Order not found")
+    if (order.paymentStatus != "PAID") {
+        throw ApiException(HttpStatusCode.BadRequest, "PAYMENT_REQUIRED", "Order must be paid before kitchen processing")
+    }
     val currentIndex = allowed.indexOf(order.status)
     val targetIndex = allowed.indexOf(targetStatus)
     if (currentIndex == -1 || targetIndex != currentIndex + 1) {
@@ -936,6 +1298,7 @@ private fun readMenu(connection: Connection, onlyActive: Boolean): List<Category
                             sortOrder = result.getInt("sort_order"),
                             isActive = result.getBoolean("is_active"),
                             isGrill = result.getBoolean("is_grill"),
+                            defaultCookingMinutes = result.getInt("default_cooking_minutes"),
                         )
                     )
                 }
@@ -1102,6 +1465,7 @@ private fun readKitchenOrders(connection: Connection, sinceUpdatedAt: Long, sinc
         JOIN devices d ON d.device_id = o.device_id
         WHERE (o.updated_at > ? OR (o.updated_at = ? AND o.id > ?))
           AND (? = 0 OR o.requested_time >= ?)
+          AND o.payment_status = 'PAID'
         ORDER BY o.updated_at ASC, o.id ASC
         """.trimIndent()
     ).use { statement ->
@@ -1224,9 +1588,9 @@ private fun readSettings(connection: Connection): Settings {
         }
     }
     return Settings(
-        workStart = LocalTime.parse(values["work_start_time"] ?: "12:00"),
-        cutoffRegular = LocalTime.parse(values["cutoff_regular"] ?: "22:45"),
-        cutoffGrill = LocalTime.parse(values["cutoff_grill"] ?: "21:45"),
+        workStart = LocalTime.parse(values["work_start_time"] ?: "00:00"),
+        cutoffRegular = LocalTime.parse(values["cutoff_regular"] ?: "23:00"),
+        cutoffGrill = LocalTime.parse(values["cutoff_grill"] ?: "23:00"),
     )
 }
 
@@ -1263,29 +1627,51 @@ private fun updateSettings(connection: Connection, body: JsonObject, now: Long):
 
 private fun createCategory(connection: Connection, request: CategoryUpsert): CategoryDto =
     connection.prepareStatement(
-        "INSERT INTO categories (name, sort_order, is_active, is_grill) VALUES (?, ?, ?, ?) RETURNING *"
+        "INSERT INTO categories (name, sort_order, is_active, is_grill, default_cooking_minutes) VALUES (?, ?, ?, ?, ?) RETURNING *"
     ).use { statement ->
         statement.setString(1, request.name)
         statement.setInt(2, request.sortOrder)
         statement.setBoolean(3, request.isActive)
         statement.setBoolean(4, request.isGrill)
+        statement.setInt(5, request.defaultCookingMinutes)
         statement.executeQuery().use { result ->
             result.next()
             result.toCategoryDto()
         }
     }
 
-private fun updateCategory(connection: Connection, id: Long, request: CategoryUpsert): CategoryDto =
-    connection.prepareStatement(
-        "UPDATE categories SET name = ?, sort_order = ?, is_active = ?, is_grill = ? WHERE id = ? RETURNING *"
+private fun updateCategory(connection: Connection, id: Long, request: CategoryUpsert): CategoryDto {
+    val previous = connection.prepareStatement("SELECT default_cooking_minutes FROM categories WHERE id = ?").use { statement ->
+        statement.setLong(1, id)
+        statement.executeQuery().use { result ->
+            if (!result.next()) throw notFound("CATEGORY_NOT_FOUND", "Category not found")
+            result.getInt("default_cooking_minutes")
+        }
+    }
+    val updated = connection.prepareStatement(
+        "UPDATE categories SET name = ?, sort_order = ?, is_active = ?, is_grill = ?, default_cooking_minutes = ? WHERE id = ? RETURNING *"
     ).use { statement ->
         statement.setString(1, request.name)
         statement.setInt(2, request.sortOrder)
         statement.setBoolean(3, request.isActive)
         statement.setBoolean(4, request.isGrill)
-        statement.setLong(5, id)
+        statement.setInt(5, request.defaultCookingMinutes)
+        statement.setLong(6, id)
         statement.executeQuery().use { result -> if (result.next()) result.toCategoryDto() else throw notFound("CATEGORY_NOT_FOUND", "Category not found") }
     }
+    if (previous != request.defaultCookingMinutes) {
+        val now = System.currentTimeMillis()
+        connection.prepareStatement(
+            "UPDATE menu_items SET cooking_time = ?, updated_at = ? WHERE category_id = ?"
+        ).use { statement ->
+            statement.setInt(1, request.defaultCookingMinutes)
+            statement.setLong(2, now)
+            statement.setLong(3, id)
+            statement.executeUpdate()
+        }
+    }
+    return updated
+}
 
 private fun createMenuItem(connection: Connection, request: MenuItemUpsert, now: Long): MenuItemDto =
     connection.prepareStatement(
@@ -1478,6 +1864,7 @@ private fun ResultSet.toCategoryDto(): CategoryDto = CategoryDto(
     sortOrder = getInt("sort_order"),
     isActive = getBoolean("is_active"),
     isGrill = getBoolean("is_grill"),
+    defaultCookingMinutes = getInt("default_cooking_minutes"),
 )
 
 private fun ResultSet.toOrderRow(client: ClientDto? = null): OrderRow = OrderRow(
@@ -1485,6 +1872,9 @@ private fun ResultSet.toOrderRow(client: ClientDto? = null): OrderRow = OrderRow
     publicId = getString("public_id"),
     deviceId = getObject("device_id", UUID::class.java),
     status = getString("status"),
+    paymentStatus = getString("payment_status"),
+    tbankPaymentId = getObject("tbank_payment_id")?.let { (it as Number).toLong() },
+    paidAt = getObject("paid_at")?.let { (it as Number).toLong() },
     createdAt = getLong("created_at"),
     updatedAt = getLong("updated_at"),
     requestedTime = getLong("requested_time"),
@@ -1557,6 +1947,7 @@ private fun io.ktor.server.application.ApplicationCall.pathId(): Long = paramete
 
 private fun CategoryUpsert.validate(): CategoryUpsert {
     if (name.isBlank()) throw ApiException(HttpStatusCode.BadRequest, "BAD_REQUEST", "name is required")
+    if (defaultCookingMinutes < 0) throw ApiException(HttpStatusCode.BadRequest, "BAD_REQUEST", "default_cooking_minutes must be >= 0")
     return copy(name = name.trim())
 }
 
