@@ -305,6 +305,12 @@ class ApiException(
     val publicId: String,
     val paymentStatus: String,
     val status: String,
+    val paymentUrl: String? = null,
+    val totalPrice: Int? = null,
+)
+
+@Serializable data class SbpQrResponse(
+    val qrSvgBase64: String,
 )
 @Serializable data class OrdersResponse(val orders: List<OrderDto>)
 @Serializable data class KitchenOrdersResponse(val orders: List<KitchenOrderDto>)
@@ -584,9 +590,27 @@ private fun Route.publicRoutes(config: AppConfig, database: AppDatabase, tbankCl
                 publicId = order.publicId,
                 paymentStatus = order.paymentStatus,
                 status = order.status,
+                paymentUrl = null,
+                totalPrice = order.totalPrice,
             )
         }
         call.respond(response)
+    }
+
+    get("/order/{public_id}/payment/sbp") {
+        val publicId = call.parameters["public_id"]
+            ?: throw ApiException(HttpStatusCode.BadRequest, "BAD_REQUEST", "public_id is required")
+        val deviceId = call.deviceIdHeader()
+        val paymentId = database.read { connection ->
+            val order = requireOrderForPayment(connection, publicId, deviceId)
+            if (order.paymentStatus == "PAID") {
+                throw ApiException(HttpStatusCode.BadRequest, "ALREADY_PAID", "Order is already paid")
+            }
+            order.tbankPaymentId
+                ?: throw ApiException(HttpStatusCode.BadRequest, "PAYMENT_NOT_INITIATED", "Payment is not initiated")
+        }
+        val qr = tbankClient.getSbpQr(paymentId)
+        call.respond(SbpQrResponse(qrSvgBase64 = qr.qrData))
     }
 
     post("/order/{public_id}/pay") {
@@ -1102,6 +1126,15 @@ private fun findOrderByPublicId(connection: Connection, publicId: String): Order
         statement.setString(1, publicId)
         statement.executeQuery().use { result -> if (result.next()) result.toOrderRow() else null }
     }
+
+private fun requireOrderForPayment(connection: Connection, publicId: String, deviceId: UUID): OrderRow {
+    val order = findOrderByPublicId(connection, publicId)
+        ?: throw ApiException(HttpStatusCode.NotFound, "ORDER_NOT_FOUND", "Order not found")
+    if (order.deviceId != deviceId) {
+        throw ApiException(HttpStatusCode.Forbidden, "ORDER_FORBIDDEN", "Order does not belong to this device")
+    }
+    return order
+}
 
 private fun buildOrderItem(connection: Connection, request: CreateOrderItemRequest): BuiltOrderItem {
     val item = findActiveMenuItem(connection, request.menuItemId)

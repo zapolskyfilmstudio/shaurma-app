@@ -75,6 +75,11 @@ data class TBankPaymentState(
     val message: String?,
 )
 
+data class TBankSbpQrResult(
+    val qrData: String,
+    val payload: String?,
+)
+
 class TBankClient(val config: TBankConfig) {
     private val json = Json {
         ignoreUnknownKeys = true
@@ -153,6 +158,51 @@ class TBankClient(val config: TBankConfig) {
             )
         val status = response["Status"]?.jsonPrimitive?.contentOrNull ?: "NEW"
         return TBankInitResult(paymentId = paymentId, paymentUrl = paymentUrl, status = status)
+    }
+
+    suspend fun getSbpQr(paymentId: Long): TBankSbpQrResult {
+        require(config.enabled) { "T-Bank is not configured" }
+        val tokenParams = linkedMapOf(
+            "TerminalKey" to config.terminalKey,
+            "PaymentId" to paymentId.toString(),
+            "DataType" to "IMAGE",
+            "PaymentMethod" to "SBP",
+        )
+        val token = buildToken(tokenParams, config.password)
+        val body = buildJsonObject {
+            put("TerminalKey", config.terminalKey)
+            put("PaymentId", paymentId)
+            put("DataType", "IMAGE")
+            put("PaymentMethod", "SBP")
+            put("Token", token)
+        }
+
+        val responseText = http.post("${config.apiUrl.trimEnd('/')}/GetQr") {
+            contentType(ContentType.Application.Json)
+            setBody(body.toString())
+        }.bodyAsText()
+
+        val response = json.parseToJsonElement(responseText).jsonObject
+        val success = response["Success"]?.jsonPrimitive?.booleanOrNull == true
+        if (!success) {
+            val message = response["Message"]?.jsonPrimitive?.contentOrNull
+                ?: response["Details"]?.jsonPrimitive?.contentOrNull
+                ?: "T-Bank GetQr failed"
+            val code = response["ErrorCode"]?.jsonPrimitive?.contentOrNull ?: "UNKNOWN"
+            throw ApiException(
+                io.ktor.http.HttpStatusCode.BadGateway,
+                "SBP_QR_FAILED",
+                "$code: $message",
+            )
+        }
+
+        val qrData = response["Data"]?.jsonPrimitive?.contentOrNull
+            ?: throw ApiException(
+                io.ktor.http.HttpStatusCode.BadGateway,
+                "SBP_QR_FAILED",
+                "T-Bank did not return QR data",
+            )
+        return TBankSbpQrResult(qrData = qrData, payload = null)
     }
 
     suspend fun getPaymentState(paymentId: Long): TBankPaymentState {
