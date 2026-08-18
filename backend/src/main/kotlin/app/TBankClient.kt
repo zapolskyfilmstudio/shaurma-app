@@ -179,7 +179,7 @@ class TBankClient(val config: TBankConfig) {
             status = response["Status"]?.jsonPrimitive?.contentOrNull.orEmpty(),
             paymentId = response["PaymentId"]?.jsonPrimitive?.longOrNull ?: paymentId,
             orderId = response["OrderId"]?.jsonPrimitive?.contentOrNull,
-            amount = response["Amount"]?.jsonPrimitive?.longOrNull(),
+            amount = response["Amount"]?.jsonPrimitive?.longOrNull,
             errorCode = response["ErrorCode"]?.jsonPrimitive?.contentOrNull,
             message = response["Message"]?.jsonPrimitive?.contentOrNull,
         )
