@@ -89,6 +89,8 @@ class TBankClient(val config: TBankConfig) {
             "Amount" to amountKopecks.toString(),
             "OrderId" to orderId,
             "Description" to description.take(140),
+            "PayType" to "O",
+            "Language" to "ru",
         )
         if (config.notificationUrl.isNotBlank()) tokenParams["NotificationURL"] = config.notificationUrl
         if (config.successUrl.isNotBlank()) tokenParams["SuccessURL"] = config.successUrl
