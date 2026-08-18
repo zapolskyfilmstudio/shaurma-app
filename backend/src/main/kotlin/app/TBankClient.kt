@@ -15,7 +15,9 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.put
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 import java.security.MessageDigest
@@ -92,7 +94,8 @@ class TBankClient(val config: TBankConfig) {
         if (config.successUrl.isNotBlank()) tokenParams["SuccessURL"] = config.successUrl
         if (config.failUrl.isNotBlank()) tokenParams["FailURL"] = config.failUrl
 
-        val body = buildMap {
+        val token = buildToken(tokenParams, config.password)
+        val body = buildJsonObject {
             put("TerminalKey", config.terminalKey)
             put("Amount", amountKopecks)
             put("OrderId", orderId)
@@ -102,12 +105,12 @@ class TBankClient(val config: TBankConfig) {
             if (config.notificationUrl.isNotBlank()) put("NotificationURL", config.notificationUrl)
             if (config.successUrl.isNotBlank()) put("SuccessURL", config.successUrl)
             if (config.failUrl.isNotBlank()) put("FailURL", config.failUrl)
-            put("Token", buildToken(tokenParams, config.password))
+            put("Token", token)
         }
 
         val responseText = http.post("${config.apiUrl.trimEnd('/')}/Init") {
             contentType(ContentType.Application.Json)
-            setBody(body)
+            setBody(json.encodeToString(body))
         }.bodyAsText()
 
         val response = json.parseToJsonElement(responseText).jsonObject
