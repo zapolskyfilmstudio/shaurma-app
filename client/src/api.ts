@@ -4,8 +4,10 @@ import type {
   MenuResponse,
   OrdersResponse,
   PaymentStatusResponse,
+  PendingOrderResponse,
   PublicConfigResponse,
   CreateOrderResponse,
+  OrderDto,
 } from "./types";
 import { getDeviceId } from "./storage";
 
@@ -52,11 +54,16 @@ export const api = {
   createOrder: (body: CreateOrderRequest) =>
     request<CreateOrderResponse>("/api/order", { method: "POST", body: JSON.stringify(body) }),
 
+  getPendingOrder: () => request<PendingOrderResponse>("/api/order/pending"),
+
   getPaymentStatus: (publicId: string) =>
     request<PaymentStatusResponse>(`/api/order/${encodeURIComponent(publicId)}/payment`),
 
   retryPayment: (publicId: string) =>
     request<CreateOrderResponse>(`/api/order/${encodeURIComponent(publicId)}/pay`, { method: "POST" }),
+
+  cancelOrder: (publicId: string) =>
+    request<OrderDto>(`/api/order/${encodeURIComponent(publicId)}/cancel`, { method: "POST" }),
 
   myOrders: (sinceUpdatedAt = 0, sinceId = 0) =>
     request<OrdersResponse>(`/api/orders/my?since_updated_at=${sinceUpdatedAt}&since_id=${sinceId}`),

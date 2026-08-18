@@ -2,7 +2,18 @@ import { StrictMode, useCallback, useEffect, useMemo, useRef, useState } from "r
 import { createRoot } from "react-dom/client";
 import { api } from "./api";
 import { MenuButton, ScreenLayout, WheelPicker } from "./components";
-import { clearCart, getDeviceId, loadCart, loadProfile, saveCart, saveProfile } from "./storage";
+import {
+  clearCartDraft,
+  clearPendingOrderId,
+  getDeviceId,
+  getPendingOrderId,
+  loadCartDraft,
+  loadProfile,
+  saveCart,
+  saveCartDraft,
+  saveProfile,
+  setPendingOrderId,
+} from "./storage";
 import {
   allowedDates,
   allowedHourRange,
@@ -22,13 +33,10 @@ import type {
   CartItem,
   CategoryDto,
   ClientProfile,
-  CreateOrderResponse,
   MenuItemDto,
   OrderDto,
 } from "./types";
 import "./styles.css";
-
-const PENDING_ORDER_KEY = "pending_order_public_id";
 
 type Route =
   | { name: "startup" }
@@ -43,6 +51,25 @@ type Route =
   | { name: "payment"; result: "success" | "fail"; publicId: string };
 
 const MENU_BUTTONS = ["ШАУРМА", "ГРИЛЬ НА УГЛЯХ", "КАРТОШКА & СНЕКИ", "НАПИТКИ", "МОИ ЗАКАЗЫ"];
+
+function paymentStatusLabel(status: string): string {
+  switch (status) {
+    case "WAITING":
+      return "Ожидает оплаты";
+    case "FAILED":
+      return "Оплата не прошла";
+    case "PAID":
+      return "Оплачен";
+    case "CANCELLED":
+      return "Отменён";
+    default:
+      return status;
+  }
+}
+
+function isUnpaidPaymentStatus(status: string): boolean {
+  return status === "WAITING" || status === "FAILED";
+}
 
 function useViewport() {
   const [size, setSize] = useState({ width: window.innerWidth, height: window.innerHeight });
@@ -65,8 +92,7 @@ function App() {
   const [message, setMessage] = useState("Загружаем...");
   const [profile, setProfile] = useState<ClientProfile | null>(loadProfile());
   const [categories, setCategories] = useState<CategoryDto[]>([]);
-  const [cart, setCart] = useState<CartItem[]>(loadCart());
-  const [orders, setOrders] = useState<OrderDto[]>([]);
+  const [cart, setCart] = useState<CartItem[]>(() => loadCartDraft().items);
   const [workStart, setWorkStart] = useState("00:00");
   const [cutoff, setCutoff] = useState("23:00");
   const [isOpen, setIsOpen] = useState(true);
@@ -107,10 +133,14 @@ function App() {
     }
     const params = new URLSearchParams(window.location.search);
     const paymentResult = params.get("payment");
-    const pendingOrder = sessionStorage.getItem(PENDING_ORDER_KEY);
+    const pendingOrder = getPendingOrderId();
     if ((paymentResult === "success" || paymentResult === "fail") && pendingOrder) {
       window.history.replaceState({}, "", window.location.pathname);
       setRoute({ name: "payment", result: paymentResult, publicId: pendingOrder });
+      return;
+    }
+    if (loadCartDraft().items.length > 0) {
+      setRoute({ name: "cart" });
       return;
     }
     setRoute({ name: "main" });
@@ -119,19 +149,6 @@ function App() {
   useEffect(() => {
     void bootstrap().catch((error) => setMessage(error instanceof Error ? error.message : "Ошибка загрузки"));
   }, [bootstrap]);
-
-  useEffect(() => {
-    if (route.name !== "orders") return;
-    const load = () => {
-      void api
-        .myOrders()
-        .then((response) => setOrders(response.orders))
-        .catch(() => undefined);
-    };
-    load();
-    const timer = window.setInterval(load, 10_000);
-    return () => window.clearInterval(timer);
-  }, [route.name]);
 
   const findCategoryByTitle = (title: string) =>
     categories.find((category) => normalizeMenuName(category.name) === normalizeMenuName(title));
@@ -257,21 +274,10 @@ function App() {
           setRoute({ name: "product", itemId: menuItemId });
         }}
         onCartChange={persistCart}
-        onOrdered={(result) => {
-          if (result.payment_url) {
-            sessionStorage.setItem(PENDING_ORDER_KEY, result.public_id);
-            clearCart();
-            setCart([]);
-            window.location.href = result.payment_url;
-            return;
-          }
-          if (result.payment_status === "PAID") {
-            clearCart();
-            setCart([]);
-            setRoute({ name: "orders" });
-            return;
-          }
-          setRoute({ name: "cart" });
+        onOrdered={() => {
+          clearCartDraft();
+          setCart([]);
+          setRoute({ name: "orders" });
         }}
         paymentEnabled={paymentEnabled}
       />
@@ -288,7 +294,7 @@ function App() {
         publicId={route.publicId}
         onHome={goMain}
         onOrders={() => {
-          sessionStorage.removeItem(PENDING_ORDER_KEY);
+          clearPendingOrderId();
           setRoute({ name: "orders" });
         }}
       />
@@ -297,25 +303,13 @@ function App() {
 
   if (route.name === "orders") {
     return (
-      <ScreenLayout topHeight={topHeight} left="home" right="cart" onLeft={goMain} onRight={goCart}>
-        <div className="list-screen">
-          {orders.length === 0 ? (
-            <p>Заказов пока нет</p>
-          ) : (
-            orders.map((order) => (
-              <div key={order.public_id} className="card">
-                <p>Дата и время: {formatDateTime(order.created_at)}</p>
-                {order.items.map((item) => (
-                  <p key={item.id}>
-                    {item.name_snapshot} — {formatMoney(item.price_snapshot)}
-                  </p>
-                ))}
-                <p>Итоговая цена: {formatMoney(order.total_price)}</p>
-              </div>
-            ))
-          )}
-        </div>
-      </ScreenLayout>
+      <OrdersScreen
+        topHeight={topHeight}
+        viewport={viewport}
+        onHome={goMain}
+        onCart={goCart}
+        paymentEnabled={paymentEnabled}
+      />
     );
   }
 
@@ -543,22 +537,32 @@ function CartScreen({
   onProfile: () => void;
   onEdit: (menuItemId: number) => void;
   onCartChange: (items: CartItem[]) => void;
-  onOrdered: (result: CreateOrderResponse) => void;
+  onOrdered: () => void;
   paymentEnabled: boolean;
 }) {
+  const initialDraft = useMemo(() => loadCartDraft(), []);
   const contentWidth = viewport.width * 0.9;
   const buttonWidth = viewport.width * 0.8;
   const buttonHeight = viewport.height * 0.85 * 0.075;
   const wheelHeight = viewport.height * 0.85 * 0.11;
-  const [comment, setComment] = useState("");
+  const [comment, setComment] = useState(initialDraft.comment);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [fontSize, setFontSize] = useState(22);
-  const userPickedTime = useRef(false);
+  const userPickedTime = useRef(initialDraft.requestedTime != null);
   const maxCooking = cart.length ? Math.max(...cart.map((item) => item.cookingTime)) : 0;
   const minTime = minimumRequestedTime(serverNow(), maxCooking);
   const maxTime = maximumRequestedTime(serverNow());
-  const [requestedTime, setRequestedTime] = useState(minTime);
+  const [requestedTime, setRequestedTime] = useState(() => {
+    if (initialDraft.requestedTime != null && initialDraft.requestedTime >= minTime && initialDraft.requestedTime <= maxTime) {
+      return initialDraft.requestedTime;
+    }
+    return minTime;
+  });
+
+  useEffect(() => {
+    saveCartDraft({ items: cart, requestedTime, comment });
+  }, [cart, requestedTime, comment]);
 
   useEffect(() => {
     const sync = () => {
@@ -631,11 +635,11 @@ function CartScreen({
           removals_ids: item.removalsIds,
         })),
       });
-      if (result.payment_url || result.payment_status === "PAID") {
-        onOrdered(result);
+      if (result.payment_status === "PAID" || result.payment_status === "WAITING") {
+        onOrdered();
         return;
       }
-      setError("Не удалось получить ссылку на оплату. Попробуйте позже.");
+      setError("Не удалось оформить заказ. Попробуйте позже.");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Не удалось создать заказ");
     } finally {
@@ -763,13 +767,129 @@ function CartScreen({
         )}
         <MenuButton text="Добавить к заказу" width={buttonWidth} height={buttonHeight} fontSize={fontSize} onClick={onHome} />
         <MenuButton
-          text={submitting ? "Переходим к оплате..." : "Оплатить"}
+          text={submitting ? "Оформляем..." : "Оформить заказ"}
           width={buttonWidth}
           height={buttonHeight}
           fontSize={fontSize}
           enabled={isTimeValid && !submitting && paymentEnabled}
           onClick={() => void submit()}
         />
+      </div>
+    </ScreenLayout>
+  );
+}
+
+function OrdersScreen({
+  topHeight,
+  viewport,
+  onHome,
+  onCart,
+  paymentEnabled,
+}: {
+  topHeight: number;
+  viewport: { width: number; height: number };
+  onHome: () => void;
+  onCart: () => void;
+  paymentEnabled: boolean;
+}) {
+  const contentWidth = viewport.width * 0.9;
+  const buttonWidth = viewport.width * 0.8;
+  const buttonHeight = viewport.height * 0.85 * 0.075;
+  const [orders, setOrders] = useState<OrderDto[]>([]);
+  const [payingId, setPayingId] = useState<string | null>(null);
+  const [cancellingId, setCancellingId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadOrders = useCallback(() => {
+    void api
+      .myOrders()
+      .then((response) => setOrders([...response.orders].sort((left, right) => right.created_at - left.created_at)))
+      .catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    loadOrders();
+    const timer = window.setInterval(loadOrders, 10_000);
+    return () => window.clearInterval(timer);
+  }, [loadOrders]);
+
+  const pay = async (publicId: string) => {
+    setPayingId(publicId);
+    setError(null);
+    try {
+      setPendingOrderId(publicId);
+      const response = await api.retryPayment(publicId);
+      if (response.payment_url) {
+        window.location.href = response.payment_url;
+        return;
+      }
+      clearPendingOrderId();
+      loadOrders();
+    } catch (caught) {
+      clearPendingOrderId();
+      setError(caught instanceof Error ? caught.message : "Не удалось открыть оплату");
+    } finally {
+      setPayingId(null);
+    }
+  };
+
+  const cancel = async (publicId: string) => {
+    setCancellingId(publicId);
+    setError(null);
+    try {
+      await api.cancelOrder(publicId);
+      loadOrders();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Не удалось отменить заказ");
+    } finally {
+      setCancellingId(null);
+    }
+  };
+
+  return (
+    <ScreenLayout topHeight={topHeight} left="home" right="cart" onLeft={onHome} onRight={onCart}>
+      <div className="list-screen">
+        {orders.length === 0 ? (
+          <p>Заказов пока нет</p>
+        ) : (
+          orders.map((order) => (
+            <div key={order.public_id} className="card" style={{ width: contentWidth }}>
+              <p>
+                <strong>{order.public_id}</strong> · {paymentStatusLabel(order.payment_status)}
+              </p>
+              <p>Оформлен: {formatDateTime(order.created_at)}</p>
+              <p>Готовность: {formatDateTime(order.requested_time)}</p>
+              {order.general_comment && <p>Комментарий: {order.general_comment}</p>}
+              {order.items.map((item) => (
+                <p key={item.id}>
+                  {item.name_snapshot} — {formatMoney(item.price_snapshot)}
+                </p>
+              ))}
+              <p>Итого: {formatMoney(order.total_price)}</p>
+              {isUnpaidPaymentStatus(order.payment_status) && paymentEnabled && (
+                <div className="row-buttons">
+                  <MenuButton
+                    text={payingId === order.public_id ? "Открываем..." : "Оплатить"}
+                    width={contentWidth * 0.42}
+                    height={buttonHeight}
+                    fontSize={20}
+                    enabled={payingId == null && cancellingId == null}
+                    onClick={() => void pay(order.public_id)}
+                  />
+                  <MenuButton
+                    text={cancellingId === order.public_id ? "Отмена..." : "Отменить"}
+                    width={contentWidth * 0.42}
+                    height={buttonHeight}
+                    fontSize={20}
+                    enabled={payingId == null && cancellingId == null}
+                    onClick={() => void cancel(order.public_id)}
+                  />
+                </div>
+              )}
+            </div>
+          ))
+        )}
+        {error && <p className="text-error">{error}</p>}
       </div>
     </ScreenLayout>
   );
@@ -806,7 +926,7 @@ function PaymentScreen({
         if (cancelled) return;
         setPaymentStatus(status.payment_status);
         if (status.payment_status === "PAID") {
-          sessionStorage.removeItem(PENDING_ORDER_KEY);
+          clearPendingOrderId();
           setMessage(`Заказ ${publicId} оплачен и отправлен на кухню`);
           return;
         }
@@ -833,12 +953,13 @@ function PaymentScreen({
     try {
       const response = await api.retryPayment(publicId);
       if (response.payment_url) {
+        setPendingOrderId(publicId);
         window.location.href = response.payment_url;
         return;
       }
       setMessage(`Заказ ${publicId} оплачен`);
       setPaymentStatus("PAID");
-      sessionStorage.removeItem(PENDING_ORDER_KEY);
+      clearPendingOrderId();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Не удалось повторить оплату");
     } finally {
@@ -855,14 +976,23 @@ function PaymentScreen({
           <MenuButton text="Мои заказы" width={buttonWidth} height={buttonHeight} fontSize={24} onClick={onOrders} />
         )}
         {(result === "fail" || paymentStatus === "FAILED") && (
-          <MenuButton
-            text={retrying ? "Открываем оплату..." : "Попробовать снова"}
-            width={buttonWidth}
-            height={buttonHeight}
-            fontSize={24}
-            enabled={!retrying}
-            onClick={() => void retry()}
-          />
+          <>
+            <MenuButton
+              text={retrying ? "Открываем оплату..." : "Попробовать снова"}
+              width={buttonWidth}
+              height={buttonHeight}
+              fontSize={24}
+              enabled={!retrying}
+              onClick={() => void retry()}
+            />
+            <MenuButton
+              text="Мои заказы"
+              width={buttonWidth}
+              height={buttonHeight}
+              fontSize={24}
+              onClick={onOrders}
+            />
+          </>
         )}
         {error && <p className="text-error">{error}</p>}
       </div>

@@ -94,7 +94,7 @@ export interface OrderDto {
   id: number;
   public_id: string;
   status: string;
-  payment_status?: string;
+  payment_status: string;
   created_at: number;
   updated_at: number;
   requested_time: number;
@@ -102,6 +102,10 @@ export interface OrderDto {
   total_price: number;
   general_comment: string | null;
   items: OrderItemDto[];
+}
+
+export interface PendingOrderResponse {
+  order: OrderDto | null;
 }
 
 export interface OrderItemDto {

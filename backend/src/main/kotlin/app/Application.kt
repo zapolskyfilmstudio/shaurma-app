@@ -312,6 +312,7 @@ class ApiException(
     val id: Long,
     val publicId: String,
     val status: String,
+    val paymentStatus: String,
     val createdAt: Long,
     val updatedAt: Long,
     val requestedTime: Long,
@@ -320,6 +321,7 @@ class ApiException(
     val generalComment: String? = null,
     val items: List<OrderItemDto>,
 )
+@Serializable data class PendingOrderResponse(val order: OrderDto? = null)
 @Serializable data class KitchenOrderDto(
     val id: Long,
     val publicId: String,
@@ -558,16 +560,24 @@ private fun Route.publicRoutes(config: AppConfig, database: AppDatabase, tbankCl
         val created = database.transaction { connection, now ->
             createOrderDraft(connection, deviceId, request, now, paymentRequired)
         }
-        val payment = initiateOrderPayment(config, tbankClient, database, created)
         call.respond(
             CreateOrderResponse(
                 publicId = created.publicId,
                 status = "NEW",
-                updatedAt = payment.updatedAt,
-                paymentStatus = payment.paymentStatus,
-                paymentUrl = payment.paymentUrl,
+                updatedAt = created.updatedAt,
+                paymentStatus = if (paymentRequired) "WAITING" else "PAID",
+                paymentUrl = null,
             )
         )
+    }
+
+    get("/order/pending") {
+        val deviceId = call.deviceIdHeader()
+        val response = database.read { connection ->
+            val order = findUnpaidOrderByDevice(connection, deviceId)
+            PendingOrderResponse(order = order?.toOrderDto(readOrderItems(connection, order.id)))
+        }
+        call.respond(response)
     }
 
     get("/order/{public_id}/payment") {
@@ -602,6 +612,9 @@ private fun Route.publicRoutes(config: AppConfig, database: AppDatabase, tbankCl
             if (order.paymentStatus == "PAID") {
                 throw ApiException(HttpStatusCode.BadRequest, "ALREADY_PAID", "Order is already paid")
             }
+            if (order.paymentStatus == "CANCELLED") {
+                throw ApiException(HttpStatusCode.BadRequest, "ORDER_CANCELLED", "Order is cancelled")
+            }
             CreatedOrder(
                 id = order.id,
                 publicId = order.publicId,
@@ -626,6 +639,29 @@ private fun Route.publicRoutes(config: AppConfig, database: AppDatabase, tbankCl
                 paymentUrl = payment.paymentUrl,
             )
         )
+    }
+
+    post("/order/{public_id}/cancel") {
+        val publicId = call.parameters["public_id"]
+            ?: throw ApiException(HttpStatusCode.BadRequest, "BAD_REQUEST", "public_id is required")
+        val deviceId = call.deviceIdHeader()
+        val cancelled = database.transaction { connection, now ->
+            val order = findOrderByPublicId(connection, publicId)
+                ?: throw ApiException(HttpStatusCode.NotFound, "ORDER_NOT_FOUND", "Order not found")
+            if (order.deviceId != deviceId) {
+                throw ApiException(HttpStatusCode.Forbidden, "ORDER_FORBIDDEN", "Order does not belong to this device")
+            }
+            if (order.paymentStatus == "PAID") {
+                throw ApiException(HttpStatusCode.BadRequest, "ALREADY_PAID", "Order is already paid")
+            }
+            if (order.paymentStatus == "CANCELLED") {
+                throw ApiException(HttpStatusCode.BadRequest, "ALREADY_CANCELLED", "Order is already cancelled")
+            }
+            markOrderCancelled(connection, order.id, now)
+            findOrderByPublicId(connection, publicId)!!
+                .toOrderDto(readOrderItems(connection, order.id))
+        }
+        call.respond(cancelled)
     }
 
     post("/webhooks/tbank") {
@@ -871,6 +907,13 @@ private fun createOrderDraft(
 ): CreatedOrder {
     val device = requireDevice(connection, deviceId)
     if (device.isBlocked) throw ApiException(HttpStatusCode.Forbidden, "DEVICE_BLOCKED", "Device is blocked")
+    findUnpaidOrderByDevice(connection, deviceId)?.let { unpaid ->
+        throw ApiException(
+            HttpStatusCode.Conflict,
+            "UNPAID_ORDER_EXISTS",
+            "У вас уже есть неоплаченный заказ ${unpaid.publicId}. Оплатите или отмените его в разделе «Мои заказы».",
+        )
+    }
     if (request.items.isEmpty() || request.items.size > 50) {
         throw ApiException(HttpStatusCode.BadRequest, "INVALID_ITEMS", "Order must contain 1..50 items")
     }
@@ -960,7 +1003,11 @@ private suspend fun initiateOrderPayment(
     }
     val updatedAt = database.transaction { connection, now ->
         connection.prepareStatement(
-            "UPDATE orders SET tbank_payment_id = ?, updated_at = ? WHERE id = ?"
+            """
+            UPDATE orders
+            SET tbank_payment_id = ?, payment_status = 'WAITING', updated_at = ?
+            WHERE id = ? AND payment_status IN ('WAITING', 'FAILED')
+            """.trimIndent()
         ).use { statement ->
             statement.setLong(1, initResult.paymentId)
             statement.setLong(2, now)
@@ -1096,6 +1143,33 @@ private fun markOrderPaymentFailed(connection: Connection, orderId: Long, paymen
         statement.executeUpdate()
     }
 }
+
+private fun markOrderCancelled(connection: Connection, orderId: Long, now: Long) {
+    connection.prepareStatement(
+        """
+        UPDATE orders
+        SET payment_status = 'CANCELLED', updated_at = ?
+        WHERE id = ? AND payment_status IN ('WAITING', 'FAILED')
+        """.trimIndent()
+    ).use { statement ->
+        statement.setLong(1, now)
+        statement.setLong(2, orderId)
+        statement.executeUpdate()
+    }
+}
+
+private fun findUnpaidOrderByDevice(connection: Connection, deviceId: UUID): OrderRow? =
+    connection.prepareStatement(
+        """
+        SELECT * FROM orders
+        WHERE device_id = ? AND payment_status IN ('WAITING', 'FAILED')
+        ORDER BY created_at DESC, id DESC
+        LIMIT 1
+        """.trimIndent()
+    ).use { statement ->
+        statement.setObject(1, deviceId)
+        statement.executeQuery().use { result -> if (result.next()) result.toOrderRow() else null }
+    }
 
 private fun findOrderByPublicId(connection: Connection, publicId: String): OrderRow? =
     connection.prepareStatement("SELECT * FROM orders WHERE public_id = ?").use { statement ->
@@ -1910,6 +1984,7 @@ private fun OrderRow.toOrderDto(items: List<OrderItemDto>): OrderDto = OrderDto(
     id = id,
     publicId = publicId,
     status = status,
+    paymentStatus = paymentStatus,
     createdAt = createdAt,
     updatedAt = updatedAt,
     requestedTime = requestedTime,
