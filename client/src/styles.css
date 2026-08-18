@@ -164,44 +164,6 @@ button.card {
   color: #fff;
 }
 
-.payment-screen {
-  padding: 16px 5% 24px;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  color: #fff;
-}
-
-.payment-screen h2,
-.payment-screen h3,
-.payment-screen p {
-  color: #fff;
-}
-
-.payment-amount {
-  font-size: 28px;
-  text-align: center;
-}
-
-.payment-section {
-  border: 2px solid #fff;
-  border-radius: 12px;
-  padding: 16px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
-  background: #000;
-}
-
-.sbp-qr {
-  width: min(100%, 280px);
-  height: auto;
-  background: #fff;
-  border-radius: 12px;
-  padding: 12px;
-}
-
 .modal-backdrop {
   position: fixed;
   inset: 0;

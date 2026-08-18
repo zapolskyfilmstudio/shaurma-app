@@ -84,12 +84,6 @@ export interface PaymentStatusResponse {
   public_id: string;
   payment_status: string;
   status: string;
-  payment_url?: string | null;
-  total_price?: number | null;
-}
-
-export interface SbpQrResponse {
-  qr_svg_base64: string;
 }
 
 export interface OrdersResponse {

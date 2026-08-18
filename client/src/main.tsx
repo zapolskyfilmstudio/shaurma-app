@@ -40,7 +40,6 @@ type Route =
   | { name: "cart" }
   | { name: "orders" }
   | { name: "profile" }
-  | { name: "checkout"; publicId: string; paymentUrl: string; totalPrice: number }
   | { name: "payment"; result: "success" | "fail"; publicId: string };
 
 const MENU_BUTTONS = ["ШАУРМА", "ГРИЛЬ НА УГЛЯХ", "КАРТОШКА & СНЕКИ", "НАПИТКИ", "МОИ ЗАКАЗЫ"];
@@ -259,17 +258,11 @@ function App() {
         }}
         onCartChange={persistCart}
         onOrdered={(result) => {
-          const orderTotal = cart.reduce((sum, item) => sum + item.totalPrice, 0);
-          if (result.payment_url && result.payment_status === "WAITING") {
+          if (result.payment_url) {
             sessionStorage.setItem(PENDING_ORDER_KEY, result.public_id);
             clearCart();
             setCart([]);
-            setRoute({
-              name: "checkout",
-              publicId: result.public_id,
-              paymentUrl: result.payment_url,
-              totalPrice: orderTotal,
-            });
+            window.location.href = result.payment_url;
             return;
           }
           if (result.payment_status === "PAID") {
@@ -281,24 +274,6 @@ function App() {
           setRoute({ name: "cart" });
         }}
         paymentEnabled={paymentEnabled}
-      />
-    );
-  }
-
-  if (route.name === "checkout") {
-    return (
-      <CheckoutScreen
-        topHeight={topHeight}
-        buttonWidth={buttonWidth}
-        buttonHeight={buttonHeight}
-        publicId={route.publicId}
-        paymentUrl={route.paymentUrl}
-        totalPrice={route.totalPrice}
-        onHome={goMain}
-        onPaid={() => {
-          sessionStorage.removeItem(PENDING_ORDER_KEY);
-          setRoute({ name: "orders" });
-        }}
       />
     );
   }
@@ -315,14 +290,6 @@ function App() {
         onOrders={() => {
           sessionStorage.removeItem(PENDING_ORDER_KEY);
           setRoute({ name: "orders" });
-        }}
-        onRetryCheckout={(checkoutPublicId, checkoutPaymentUrl, checkoutTotalPrice) => {
-          setRoute({
-            name: "checkout",
-            publicId: checkoutPublicId,
-            paymentUrl: checkoutPaymentUrl,
-            totalPrice: checkoutTotalPrice,
-          });
         }}
       />
     );
@@ -808,112 +775,6 @@ function CartScreen({
   );
 }
 
-function CheckoutScreen({
-  topHeight,
-  buttonWidth,
-  buttonHeight,
-  publicId,
-  paymentUrl,
-  totalPrice,
-  onHome,
-  onPaid,
-}: {
-  topHeight: number;
-  buttonWidth: number;
-  buttonHeight: number;
-  publicId: string;
-  paymentUrl: string;
-  totalPrice: number;
-  onHome: () => void;
-  onPaid: () => void;
-}) {
-  const [qrSrc, setQrSrc] = useState<string | null>(null);
-  const [loadingQr, setLoadingQr] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [message, setMessage] = useState("Отсканируйте QR-код в приложении банка");
-
-  useEffect(() => {
-    let cancelled = false;
-    const loadQr = async () => {
-      setLoadingQr(true);
-      setError(null);
-      try {
-        const response = await api.getSbpQr(publicId);
-        if (cancelled) return;
-        setQrSrc(`data:image/svg+xml;base64,${response.qr_svg_base64}`);
-      } catch (caught) {
-        if (!cancelled) {
-          setError(caught instanceof Error ? caught.message : "Не удалось получить QR для СБП");
-        }
-      } finally {
-        if (!cancelled) setLoadingQr(false);
-      }
-    };
-    void loadQr();
-    return () => {
-      cancelled = true;
-    };
-  }, [publicId]);
-
-  useEffect(() => {
-    let cancelled = false;
-    const poll = async () => {
-      try {
-        const status = await api.getPaymentStatus(publicId);
-        if (cancelled) return;
-        if (status.payment_status === "PAID") {
-          setMessage(`Заказ ${publicId} оплачен и отправлен на кухню`);
-          window.setTimeout(onPaid, 800);
-          return;
-        }
-        if (status.payment_status === "FAILED") {
-          setMessage("Оплата не подтверждена");
-          return;
-        }
-        window.setTimeout(poll, 2000);
-      } catch {
-        if (!cancelled) window.setTimeout(poll, 3000);
-      }
-    };
-    void poll();
-    return () => {
-      cancelled = true;
-    };
-  }, [publicId, onPaid]);
-
-  return (
-    <ScreenLayout topHeight={topHeight} left="home" right="home" onLeft={onHome} onRight={onHome}>
-      <div className="payment-screen">
-        <h2>Оплата заказа {publicId}</h2>
-        <p className="payment-amount">{formatMoney(totalPrice)}</p>
-
-        <section className="payment-section">
-          <h3>1. СБП</h3>
-          <p>{message}</p>
-          {loadingQr && <div className="spinner" />}
-          {qrSrc && (
-            <img src={qrSrc} alt="QR-код для оплаты через СБП" className="sbp-qr" />
-          )}
-          {error && <p className="text-error">{error}</p>}
-        </section>
-
-        <section className="payment-section">
-          <h3>2. Банковская карта</h3>
-          <MenuButton
-            text="Оплатить картой"
-            width={buttonWidth}
-            height={buttonHeight}
-            fontSize={22}
-            onClick={() => {
-              window.location.href = paymentUrl;
-            }}
-          />
-        </section>
-      </div>
-    </ScreenLayout>
-  );
-}
-
 function PaymentScreen({
   topHeight,
   buttonWidth,
@@ -922,7 +783,6 @@ function PaymentScreen({
   publicId,
   onHome,
   onOrders,
-  onRetryCheckout,
 }: {
   topHeight: number;
   buttonWidth: number;
@@ -931,7 +791,6 @@ function PaymentScreen({
   publicId: string;
   onHome: () => void;
   onOrders: () => void;
-  onRetryCheckout: (publicId: string, paymentUrl: string, totalPrice: number) => void;
 }) {
   const [message, setMessage] = useState(result === "success" ? "Проверяем оплату..." : "Оплата не прошла");
   const [paymentStatus, setPaymentStatus] = useState<string | null>(null);
@@ -973,10 +832,8 @@ function PaymentScreen({
     setError(null);
     try {
       const response = await api.retryPayment(publicId);
-      if (response.payment_url && response.payment_status === "WAITING") {
-        sessionStorage.setItem(PENDING_ORDER_KEY, publicId);
-        const status = await api.getPaymentStatus(publicId);
-        onRetryCheckout(publicId, response.payment_url, status.total_price ?? 0);
+      if (response.payment_url) {
+        window.location.href = response.payment_url;
         return;
       }
       setMessage(`Заказ ${publicId} оплачен`);

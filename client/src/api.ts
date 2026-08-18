@@ -6,7 +6,6 @@ import type {
   PaymentStatusResponse,
   PublicConfigResponse,
   CreateOrderResponse,
-  SbpQrResponse,
 } from "./types";
 import { getDeviceId } from "./storage";
 
@@ -55,9 +54,6 @@ export const api = {
 
   getPaymentStatus: (publicId: string) =>
     request<PaymentStatusResponse>(`/api/order/${encodeURIComponent(publicId)}/payment`),
-
-  getSbpQr: (publicId: string) =>
-    request<SbpQrResponse>(`/api/order/${encodeURIComponent(publicId)}/payment/sbp`),
 
   retryPayment: (publicId: string) =>
     request<CreateOrderResponse>(`/api/order/${encodeURIComponent(publicId)}/pay`, { method: "POST" }),
