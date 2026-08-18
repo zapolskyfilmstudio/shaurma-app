@@ -9,6 +9,7 @@ MVP запускается одинаково на ноутбуке и на VPS:
 3. Создать `.env` из `.env.example` и заменить:
    - `POSTGRES_PASSWORD`
    - `BEARER_TOKEN`
+   - `VITE_BEARER_TOKEN` — **должен совпадать с `BEARER_TOKEN`** (иначе кухня получит 401 и не увидит заказы)
    - `CORS_ALLOWED_ORIGINS`
    - публичные URL для Android/Kitchen сборок.
    - `TBANK_TERMINAL_KEY`, `TBANK_PASSWORD`, `TBANK_NOTIFICATION_URL`, `TBANK_SUCCESS_URL`, `TBANK_FAIL_URL` для оплаты через T-Bank.
