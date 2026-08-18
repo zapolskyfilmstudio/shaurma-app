@@ -11,6 +11,7 @@ export interface PublicConfigResponse {
   work_start_time: string;
   cutoff_time: string;
   is_open: boolean;
+  payment_enabled: boolean;
 }
 
 export interface MenuResponse {

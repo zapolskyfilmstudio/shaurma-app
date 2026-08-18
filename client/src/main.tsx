@@ -70,6 +70,7 @@ function App() {
   const [workStart, setWorkStart] = useState("00:00");
   const [cutoff, setCutoff] = useState("23:00");
   const [isOpen, setIsOpen] = useState(true);
+  const [paymentEnabled, setPaymentEnabled] = useState(false);
   const [serverOffset, setServerOffset] = useState(profile?.serverTimeOffsetMs ?? 0);
 
   const serverNow = () => Date.now() + serverOffset;
@@ -98,6 +99,7 @@ function App() {
     setWorkStart(config.work_start_time);
     setCutoff(config.cutoff_time);
     setIsOpen(config.is_open);
+    setPaymentEnabled(config.payment_enabled);
     setCategories(menu.categories);
     if (init.is_blocked) {
       setRoute({ name: "blocked" });
@@ -263,10 +265,15 @@ function App() {
             window.location.href = result.payment_url;
             return;
           }
-          clearCart();
-          setCart([]);
-          setRoute({ name: "orders" });
+          if (result.payment_status === "PAID") {
+            clearCart();
+            setCart([]);
+            setRoute({ name: "orders" });
+            return;
+          }
+          setRoute({ name: "cart" });
         }}
+        paymentEnabled={paymentEnabled}
       />
     );
   }
@@ -523,6 +530,7 @@ function CartScreen({
   onEdit,
   onCartChange,
   onOrdered,
+  paymentEnabled,
 }: {
   cart: CartItem[];
   topHeight: number;
@@ -536,6 +544,7 @@ function CartScreen({
   onEdit: (menuItemId: number) => void;
   onCartChange: (items: CartItem[]) => void;
   onOrdered: (result: CreateOrderResponse) => void;
+  paymentEnabled: boolean;
 }) {
   const contentWidth = viewport.width * 0.9;
   const buttonWidth = viewport.width * 0.8;
@@ -622,7 +631,11 @@ function CartScreen({
           removals_ids: item.removalsIds,
         })),
       });
-      onOrdered(result);
+      if (result.payment_url || result.payment_status === "PAID") {
+        onOrdered(result);
+        return;
+      }
+      setError("Не удалось получить ссылку на оплату. Попробуйте позже.");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Не удалось создать заказ");
     } finally {
@@ -743,13 +756,18 @@ function CartScreen({
           </p>
         )}
         {error && <p className="text-error">{error}</p>}
+        {!paymentEnabled && (
+          <p className="text-error" style={{ width: contentWidth, textAlign: "center" }}>
+            Онлайн-оплата временно недоступна — администратор должен настроить T-Bank на сервере.
+          </p>
+        )}
         <MenuButton text="Добавить к заказу" width={buttonWidth} height={buttonHeight} fontSize={fontSize} onClick={onHome} />
         <MenuButton
           text={submitting ? "Переходим к оплате..." : "Оплатить"}
           width={buttonWidth}
           height={buttonHeight}
           fontSize={fontSize}
-          enabled={isTimeValid && !submitting}
+          enabled={isTimeValid && !submitting && paymentEnabled}
           onClick={() => void submit()}
         />
       </div>

@@ -31,6 +31,7 @@ services:
       TBANK_NOTIFICATION_URL: ${TBANK_NOTIFICATION_URL:-}
       TBANK_SUCCESS_URL: ${TBANK_SUCCESS_URL:-}
       TBANK_FAIL_URL: ${TBANK_FAIL_URL:-}
+      PAYMENT_SKIP: ${PAYMENT_SKIP:-false}
     ports:
       - "${SERVER_PORT}:8080"
     depends_on:

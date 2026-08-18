@@ -146,7 +146,7 @@ fun Application.module(
 
     routing {
         route("/api") {
-            publicRoutes(database, tbankClient)
+            publicRoutes(config, database, tbankClient)
             authenticate("api-bearer") {
                 kitchenRoutes(database)
                 adminRoutes(database)
@@ -162,6 +162,7 @@ data class AppConfig(
     val bearerToken: String,
     val serverPort: Int,
     val corsAllowedOrigins: List<String>,
+    val paymentSkip: Boolean,
 ) {
     companion object {
         fun fromEnv(): AppConfig = AppConfig(
@@ -174,6 +175,7 @@ data class AppConfig(
                 .split(",")
                 .map { it.trim() }
                 .filter { it.isNotEmpty() },
+            paymentSkip = env("PAYMENT_SKIP", "false").equals("true", ignoreCase = true),
         )
 
         private fun env(name: String, default: String): String = System.getenv(name)?.takeIf { it.isNotBlank() } ?: default
@@ -240,6 +242,7 @@ class ApiException(
     val workStartTime: String,
     val cutoffTime: String,
     val isOpen: Boolean,
+    val paymentEnabled: Boolean,
 )
 @Serializable data class CategoryDto(
     val id: Long,
@@ -477,7 +480,7 @@ private val SimpleRateLimitPlugin = createApplicationPlugin(name = "SimpleRateLi
     }
 }
 
-private fun Route.publicRoutes(database: AppDatabase, tbankClient: TBankClient) {
+private fun Route.publicRoutes(config: AppConfig, database: AppDatabase, tbankClient: TBankClient) {
     post("/init") {
         val request = call.receive<InitRequest>()
         val platform = parseClientPlatform(request.platform)
@@ -506,6 +509,7 @@ private fun Route.publicRoutes(database: AppDatabase, tbankClient: TBankClient) 
                 workStartTime = settings.workStart.toString(),
                 cutoffTime = settings.cutoffRegular.toString(),
                 isOpen = !nowTime.isBefore(settings.workStart) && !nowTime.isAfter(settings.cutoffRegular),
+                paymentEnabled = tbankClient.config.enabled,
             )
         }
         call.respond(response)
@@ -539,17 +543,25 @@ private fun Route.publicRoutes(database: AppDatabase, tbankClient: TBankClient) 
     }
 
     post("/order") {
+        if (!tbankClient.config.enabled && !config.paymentSkip) {
+            throw ApiException(
+                HttpStatusCode.ServiceUnavailable,
+                "PAYMENT_NOT_CONFIGURED",
+                "Онлайн-оплата не настроена. Укажите TBANK_TERMINAL_KEY и TBANK_PASSWORD в .env и перезапустите backend.",
+            )
+        }
         val request = call.receive<CreateOrderRequest>()
         val deviceId = call.deviceIdHeader()
+        val paymentRequired = tbankClient.config.enabled
         val created = database.transaction { connection, now ->
-            createOrderDraft(connection, deviceId, request, now, tbankClient.config.enabled)
+            createOrderDraft(connection, deviceId, request, now, paymentRequired)
         }
-        val payment = initiateOrderPayment(tbankClient, database, created)
+        val payment = initiateOrderPayment(config, tbankClient, database, created)
         call.respond(
             CreateOrderResponse(
                 publicId = created.publicId,
                 status = "NEW",
-                updatedAt = created.updatedAt,
+                updatedAt = payment.updatedAt,
                 paymentStatus = payment.paymentStatus,
                 paymentUrl = payment.paymentUrl,
             )
@@ -595,7 +607,14 @@ private fun Route.publicRoutes(database: AppDatabase, tbankClient: TBankClient) 
                 updatedAt = order.updatedAt,
             )
         }
-        val payment = initiateOrderPayment(tbankClient, database, created)
+        if (!tbankClient.config.enabled && !config.paymentSkip) {
+            throw ApiException(
+                HttpStatusCode.ServiceUnavailable,
+                "PAYMENT_NOT_CONFIGURED",
+                "Онлайн-оплата не настроена. Укажите TBANK_TERMINAL_KEY и TBANK_PASSWORD в .env и перезапустите backend.",
+            )
+        }
+        val payment = initiateOrderPayment(config, tbankClient, database, created)
         call.respond(
             CreateOrderResponse(
                 publicId = created.publicId,
@@ -911,11 +930,19 @@ private data class OrderPaymentResult(
 )
 
 private suspend fun initiateOrderPayment(
+    config: AppConfig,
     tbankClient: TBankClient,
     database: AppDatabase,
     created: CreatedOrder,
 ): OrderPaymentResult {
     if (!tbankClient.config.enabled) {
+        if (!config.paymentSkip) {
+            throw ApiException(
+                HttpStatusCode.ServiceUnavailable,
+                "PAYMENT_NOT_CONFIGURED",
+                "Онлайн-оплата не настроена. Укажите TBANK_TERMINAL_KEY и TBANK_PASSWORD в .env и перезапустите backend.",
+            )
+        }
         return OrderPaymentResult(paymentStatus = "PAID", paymentUrl = null, updatedAt = created.updatedAt)
     }
     val description = "Заказ ${created.publicId} МегаШаверма"
