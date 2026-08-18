@@ -46,6 +46,7 @@ import kotlinx.serialization.json.contentOrNull
 import org.flywaydb.core.Flyway
 import org.jetbrains.exposed.sql.Database
 import org.postgresql.util.PGobject
+import org.slf4j.LoggerFactory
 import java.net.IDN
 import java.net.URI
 import java.sql.Connection
@@ -62,6 +63,7 @@ import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.max
 
 private val MoscowZone: ZoneId = ZoneId.of("Europe/Moscow")
+private val paymentLogger = LoggerFactory.getLogger("app.payment")
 
 private fun expandCorsOrigins(origins: List<String>): List<String> =
     origins.flatMap { origin ->
@@ -629,9 +631,7 @@ private fun Route.publicRoutes(config: AppConfig, database: AppDatabase, tbankCl
     post("/webhooks/tbank") {
         val body = call.receive<JsonObject>()
         val notification = tbankClient.parseNotification(body)
-        database.transaction { connection, now ->
-            handleTBankNotification(connection, notification, now)
-        }
+        handleTBankNotification(tbankClient, database, notification)
         call.respondText("OK")
     }
 
@@ -976,18 +976,95 @@ private suspend fun initiateOrderPayment(
     )
 }
 
-private fun handleTBankNotification(connection: Connection, notification: TBankNotification, now: Long) {
+private suspend fun handleTBankNotification(
+    tbankClient: TBankClient,
+    database: AppDatabase,
+    notification: TBankNotification,
+) {
     if (notification.orderId.isBlank()) return
-    val order = findOrderByPublicId(connection, notification.orderId) ?: return
-    when (notification.status.uppercase()) {
-        "CONFIRMED" -> if (notification.success) {
-            markOrderPaid(connection, order.id, notification.paymentId, now)
+    paymentLogger.info(
+        "T-Bank webhook orderId={} status={} success={} paymentId={} errorCode={}",
+        notification.orderId,
+        notification.status,
+        notification.success,
+        notification.paymentId,
+        notification.errorCode,
+    )
+
+    val order = database.read { connection ->
+        findOrderByPublicId(connection, notification.orderId)
+    } ?: run {
+        paymentLogger.warn("T-Bank webhook ignored: order {} not found", notification.orderId)
+        return
+    }
+
+    when {
+        shouldConfirmPayment(notification) -> {
+            val paymentId = notification.paymentId ?: order.tbankPaymentId
+            if (paymentId == null) {
+                paymentLogger.warn(
+                    "T-Bank webhook ignored: no paymentId for order {}",
+                    notification.orderId,
+                )
+                return
+            }
+            val expectedAmountKopecks = order.totalPrice.toLong() * 100
+            if (notification.amount != null && notification.amount != expectedAmountKopecks) {
+                paymentLogger.warn(
+                    "T-Bank webhook ignored: amount mismatch for order {} (expected={}, got={})",
+                    notification.orderId,
+                    expectedAmountKopecks,
+                    notification.amount,
+                )
+                return
+            }
+
+            val paymentState = try {
+                tbankClient.getPaymentState(paymentId)
+            } catch (error: Throwable) {
+                paymentLogger.error(
+                    "T-Bank GetState failed for order {} paymentId={}: {}",
+                    notification.orderId,
+                    paymentId,
+                    error.message,
+                )
+                return
+            }
+
+            if (!tbankClient.isSuccessfulPayment(paymentState, order.publicId, expectedAmountKopecks)) {
+                paymentLogger.warn(
+                    "T-Bank payment not confirmed for order {}: status={} success={} errorCode={} amount={}",
+                    notification.orderId,
+                    paymentState.status,
+                    paymentState.success,
+                    paymentState.errorCode,
+                    paymentState.amount,
+                )
+                return
+            }
+
+            database.transaction { connection, now ->
+                markOrderPaid(connection, order.id, paymentId, now)
+            }
+            paymentLogger.info("Order {} marked PAID after GetState verification", notification.orderId)
         }
-        "REJECTED", "CANCELED", "REVERSED", "DEADLINE_EXPIRED" -> {
-            markOrderPaymentFailed(connection, order.id, notification.paymentId, now)
+        shouldFailPayment(notification) -> {
+            database.transaction { connection, now ->
+                markOrderPaymentFailed(connection, order.id, notification.paymentId, now)
+            }
+            paymentLogger.info("Order {} marked FAILED from webhook status {}", notification.orderId, notification.status)
         }
     }
 }
+
+private fun shouldConfirmPayment(notification: TBankNotification): Boolean =
+    notification.status.uppercase() == "CONFIRMED" &&
+        notification.success &&
+        TBankClient.isSuccessfulErrorCode(notification.errorCode)
+
+private fun shouldFailPayment(notification: TBankNotification): Boolean =
+    TBankClient.isFailedPaymentStatus(notification.status)
+
 
 private fun markOrderPaid(connection: Connection, orderId: Long, paymentId: Long?, now: Long) {
     connection.prepareStatement(

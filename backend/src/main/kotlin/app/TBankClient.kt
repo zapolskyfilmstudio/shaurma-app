@@ -65,6 +65,16 @@ data class TBankNotification(
     val raw: JsonObject,
 )
 
+data class TBankPaymentState(
+    val success: Boolean,
+    val status: String,
+    val paymentId: Long?,
+    val orderId: String?,
+    val amount: Long?,
+    val errorCode: String?,
+    val message: String?,
+)
+
 class TBankClient(val config: TBankConfig) {
     private val json = Json {
         ignoreUnknownKeys = true
@@ -145,6 +155,45 @@ class TBankClient(val config: TBankConfig) {
         return TBankInitResult(paymentId = paymentId, paymentUrl = paymentUrl, status = status)
     }
 
+    suspend fun getPaymentState(paymentId: Long): TBankPaymentState {
+        require(config.enabled) { "T-Bank is not configured" }
+        val tokenParams = linkedMapOf(
+            "TerminalKey" to config.terminalKey,
+            "PaymentId" to paymentId.toString(),
+        )
+        val token = buildToken(tokenParams, config.password)
+        val body = buildJsonObject {
+            put("TerminalKey", config.terminalKey)
+            put("PaymentId", paymentId)
+            put("Token", token)
+        }
+
+        val responseText = http.post("${config.apiUrl.trimEnd('/')}/GetState") {
+            contentType(ContentType.Application.Json)
+            setBody(body.toString())
+        }.bodyAsText()
+
+        val response = json.parseToJsonElement(responseText).jsonObject
+        return TBankPaymentState(
+            success = response["Success"]?.jsonPrimitive?.booleanOrNull == true,
+            status = response["Status"]?.jsonPrimitive?.contentOrNull.orEmpty(),
+            paymentId = response["PaymentId"]?.jsonPrimitive?.longOrNull ?: paymentId,
+            orderId = response["OrderId"]?.jsonPrimitive?.contentOrNull,
+            amount = response["Amount"]?.jsonPrimitive?.longOrNull(),
+            errorCode = response["ErrorCode"]?.jsonPrimitive?.contentOrNull,
+            message = response["Message"]?.jsonPrimitive?.contentOrNull,
+        )
+    }
+
+    fun isSuccessfulPayment(state: TBankPaymentState, expectedOrderId: String, expectedAmountKopecks: Long): Boolean {
+        if (!state.success) return false
+        if (!isSuccessfulErrorCode(state.errorCode)) return false
+        if (state.status.uppercase() != "CONFIRMED") return false
+        if (state.orderId != null && state.orderId != expectedOrderId) return false
+        if (state.amount != null && state.amount != expectedAmountKopecks) return false
+        return true
+    }
+
     fun parseNotification(body: JsonObject): TBankNotification {
         val token = body["Token"]?.jsonPrimitive?.contentOrNull
             ?: throw ApiException(io.ktor.http.HttpStatusCode.BadRequest, "INVALID_NOTIFICATION", "Token is required")
@@ -171,6 +220,22 @@ class TBankClient(val config: TBankConfig) {
         buildToken(params, config.password).equals(expectedToken, ignoreCase = true)
 
     companion object {
+        private val FAILED_PAYMENT_STATUSES = setOf(
+            "REJECTED",
+            "CANCELED",
+            "REVERSED",
+            "DEADLINE_EXPIRED",
+            "AUTH_FAIL",
+            "REFUNDED",
+            "PARTIAL_REFUNDED",
+        )
+
+        fun isFailedPaymentStatus(status: String): Boolean =
+            status.uppercase() in FAILED_PAYMENT_STATUSES
+
+        fun isSuccessfulErrorCode(errorCode: String?): Boolean =
+            errorCode.isNullOrBlank() || errorCode == "0"
+
         fun buildToken(params: Map<String, String>, password: String): String {
             val entries = params
                 .filterValues { it.isNotBlank() }
