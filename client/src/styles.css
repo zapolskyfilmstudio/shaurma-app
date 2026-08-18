@@ -50,10 +50,27 @@ button {
 }
 
 .icon-btn {
+  position: relative;
   border: 0;
   background: transparent;
   padding: 0;
   cursor: pointer;
+}
+
+.cart-badge {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: #e53935;
+  color: #fff;
+  font-family: system-ui, sans-serif;
+  font-weight: 700;
+  text-align: center;
+  border: 2px solid #000;
+  box-shadow: 0 0 0 1px #fff;
+  pointer-events: none;
 }
 
 .content-zone {

@@ -161,6 +161,7 @@ function App() {
   const goMain = () => setRoute({ name: "main" });
   const goCart = () => setRoute({ name: "cart" });
   const goProfile = () => setRoute({ name: "profile" });
+  const cartCount = cart.length;
 
   if (route.name === "startup") {
     return (
@@ -193,13 +194,14 @@ function App() {
         onMissing={(title) => setRoute({ name: "missing", title })}
         onOrders={() => setRoute({ name: "orders" })}
         findCategoryByTitle={findCategoryByTitle}
+        cartCount={cartCount}
       />
     );
   }
 
   if (route.name === "missing") {
     return (
-      <ScreenLayout topHeight={topHeight} left="home" right="cart" onLeft={goMain} onRight={goCart}>
+      <ScreenLayout topHeight={topHeight} left="home" right="cart" onLeft={goMain} onRight={goCart} cartCount={cartCount}>
         <div className="centered-column">
           <h2>{route.title}</h2>
           <p className="text-muted">Раздел скоро появится</p>
@@ -212,7 +214,7 @@ function App() {
     const category = categories.find((item) => item.id === route.categoryId);
     const items = category?.items.filter((item) => item.is_active) ?? [];
     return (
-      <ScreenLayout topHeight={topHeight} left="home" right="cart" onLeft={goMain} onRight={goCart}>
+      <ScreenLayout topHeight={topHeight} left="home" right="cart" onLeft={goMain} onRight={goCart} cartCount={cartCount}>
         <div className="category-screen">
           <h2>{category?.name ?? "Категория"}</h2>
           {items.map((item) => (
@@ -248,11 +250,11 @@ function App() {
         }}
         onAdded={(item) => {
           persistCart([...cart, item]);
-          if (productItem) setRoute({ name: "category", categoryId: productItem.category_id });
-          else goMain();
+          goMain();
         }}
         goMain={goMain}
         goCart={goCart}
+        cartCount={cartCount}
       />
     );
   }
@@ -297,6 +299,7 @@ function App() {
           clearPendingOrderId();
           setRoute({ name: "orders" });
         }}
+        cartCount={cartCount}
       />
     );
   }
@@ -309,6 +312,7 @@ function App() {
         onHome={goMain}
         onCart={goCart}
         paymentEnabled={paymentEnabled}
+        cartCount={cartCount}
       />
     );
   }
@@ -325,6 +329,7 @@ function App() {
         setProfile(next);
         saveProfile(next);
       }}
+      cartCount={cartCount}
     />
   );
 }
@@ -340,6 +345,7 @@ function MainScreen({
   onMissing,
   onOrders,
   findCategoryByTitle,
+  cartCount,
 }: {
   topHeight: number;
   buttonWidth: number;
@@ -351,10 +357,11 @@ function MainScreen({
   onMissing: (title: string) => void;
   onOrders: () => void;
   findCategoryByTitle: (title: string) => CategoryDto | undefined;
+  cartCount: number;
 }) {
   const [fontSize, setFontSize] = useState(28);
   return (
-    <ScreenLayout topHeight={topHeight} left="profile" right="cart" onLeft={onProfile} onRight={onCart}>
+    <ScreenLayout topHeight={topHeight} left="profile" right="cart" onLeft={onProfile} onRight={onCart} cartCount={cartCount}>
       <div className="centered-column" style={{ gap: buttonGap }}>
         {MENU_BUTTONS.map((title) => (
           <MenuButton
@@ -389,6 +396,7 @@ function ProductScreen({
   onAdded,
   goMain,
   goCart,
+  cartCount,
 }: {
   item: (MenuItemDto & { category: CategoryDto }) | null;
   topHeight: number;
@@ -398,6 +406,7 @@ function ProductScreen({
   onAdded: (item: CartItem) => void;
   goMain: () => void;
   goCart: () => void;
+  cartCount: number;
 }) {
   const resolved = item;
   const [selectedAdditions, setSelectedAdditions] = useState<number[]>([]);
@@ -407,7 +416,7 @@ function ProductScreen({
 
   if (!resolved) {
     return (
-      <ScreenLayout topHeight={topHeight} left="home" right="cart" onLeft={goMain} onRight={goCart}>
+      <ScreenLayout topHeight={topHeight} left="home" right="cart" onLeft={goMain} onRight={goCart} cartCount={cartCount}>
         <div className="centered-column">
           <div className="spinner" />
           <p>Загружаем товар...</p>
@@ -447,7 +456,7 @@ function ProductScreen({
   };
 
   return (
-    <ScreenLayout topHeight={topHeight} left="home" right="cart" onLeft={goMain} onRight={goCart}>
+    <ScreenLayout topHeight={topHeight} left="home" right="cart" onLeft={goMain} onRight={goCart} cartCount={cartCount}>
       <div className="product-screen">
         <button type="button" className="menu-btn" style={{ width: 120, height: 40 }} onClick={onBack}>
           НАЗАД
@@ -785,12 +794,14 @@ function OrdersScreen({
   onHome,
   onCart,
   paymentEnabled,
+  cartCount,
 }: {
   topHeight: number;
   viewport: { width: number; height: number };
   onHome: () => void;
   onCart: () => void;
   paymentEnabled: boolean;
+  cartCount: number;
 }) {
   const contentWidth = viewport.width * 0.9;
   const buttonWidth = viewport.width * 0.8;
@@ -847,7 +858,7 @@ function OrdersScreen({
   };
 
   return (
-    <ScreenLayout topHeight={topHeight} left="home" right="cart" onLeft={onHome} onRight={onCart}>
+    <ScreenLayout topHeight={topHeight} left="home" right="cart" onLeft={onHome} onRight={onCart} cartCount={cartCount}>
       <div className="list-screen">
         {orders.length === 0 ? (
           <p>Заказов пока нет</p>
@@ -903,6 +914,7 @@ function PaymentScreen({
   publicId,
   onHome,
   onOrders,
+  cartCount,
 }: {
   topHeight: number;
   buttonWidth: number;
@@ -911,6 +923,7 @@ function PaymentScreen({
   publicId: string;
   onHome: () => void;
   onOrders: () => void;
+  cartCount: number;
 }) {
   const [message, setMessage] = useState(result === "success" ? "Проверяем оплату..." : "Оплата не прошла");
   const [paymentStatus, setPaymentStatus] = useState<string | null>(null);
@@ -968,7 +981,7 @@ function PaymentScreen({
   };
 
   return (
-    <ScreenLayout topHeight={topHeight} left="home" right="cart" onLeft={onHome} onRight={onOrders}>
+    <ScreenLayout topHeight={topHeight} left="home" right="cart" onLeft={onHome} onRight={onOrders} cartCount={cartCount}>
       <div className="centered-column" style={{ width: buttonWidth }}>
         <h2>{result === "success" ? "Оплата" : "Оплата не прошла"}</h2>
         <p>{message}</p>
@@ -1008,6 +1021,7 @@ function ProfileScreen({
   onHome,
   onCart,
   onSaved,
+  cartCount,
 }: {
   profile: ClientProfile | null;
   topHeight: number;
@@ -1016,6 +1030,7 @@ function ProfileScreen({
   onHome: () => void;
   onCart: () => void;
   onSaved: (profile: ClientProfile) => void;
+  cartCount: number;
 }) {
   const [name, setName] = useState(profile?.name ?? "");
   const [phone, setPhone] = useState(profile?.phone ?? "");
@@ -1045,7 +1060,7 @@ function ProfileScreen({
   };
 
   return (
-    <ScreenLayout topHeight={topHeight} left="home" right="cart" onLeft={onHome} onRight={onCart}>
+    <ScreenLayout topHeight={topHeight} left="home" right="cart" onLeft={onHome} onRight={onCart} cartCount={cartCount}>
       <div className="centered-column" style={{ width: buttonWidth }}>
         <p>
           {profile?.clientNumber
