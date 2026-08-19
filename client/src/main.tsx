@@ -736,9 +736,9 @@ function CartScreen({
   useEffect(() => {
     if (!scheduleReady || !selectedBounds.isValid) return;
     if (!selectedInAllowed || requestedTime < selectedBounds.minMs || requestedTime > selectedBounds.maxMs) {
-      setRequestedTime(normalizeRequestedTime(requestedTime, nowMs, maxCooking, weeklySchedule));
+      setRequestedTime(normalizeRequestedTime(requestedTime, serverNow(), maxCooking, weeklySchedule));
     }
-  }, [scheduleReady, selectedInAllowed, selectedBounds.isValid, selectedBounds.minMs, selectedBounds.maxMs, requestedTime, maxCooking, weeklySchedule, nowMs]);
+  }, [scheduleReady, selectedInAllowed, selectedBounds.isValid, selectedBounds.minMs, selectedBounds.maxMs, requestedTime, maxCooking, weeklySchedule, serverNow]);
 
   const setDate = (year: number, month: number, day: number) => {
     userPickedTime.current = true;
