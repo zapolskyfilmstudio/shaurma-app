@@ -177,10 +177,10 @@ class TBankClient(val config: TBankConfig) {
             put("TerminalKey", config.terminalKey)
             put("ScenarioType", "qr")
             put("PaymentMethod", "SBP")
-            putJsonObject("Device") {
+            put("Device", buildJsonObject {
                 put("Type", deviceType)
                 put("Os", deviceOs)
-            }
+            })
             put("Token", token)
         }
 
