@@ -117,6 +117,6 @@ export const api = {
     request<{ orders: OrderDto[] }>(`/api/clients/${client_number}/orders`),
 
   getSettings: () => request<SettingsResponse>("/api/admin/settings"),
-  updateSettings: (body: Record<string, string>) =>
+  updateSettings: (body: Record<string, unknown>) =>
     request<SettingsResponse>("/api/admin/settings", { method: "PUT", ...jsonBody(body) }),
 };

@@ -5,6 +5,7 @@ import type {
   AdditionDto,
   CategoryDto,
   ClientDto,
+  DayScheduleDto,
   KitchenOrderDto,
   MenuItemDto,
   OrderDto,
@@ -361,7 +362,7 @@ function OrderCard({
               <p>✅ {item.additions_snapshot.map((addition) => `${addition.name} +${formatMoney(addition.price)}`).join(", ")}</p>
             )}
             {item.removals_snapshot.length > 0 && (
-              <p>❌ {item.removals_snapshot.map((removal) => removal.name).join(", ")}</p>
+              <p>НЕ КЛАСТЬ: {item.removals_snapshot.map((removal) => removal.name).join(", ")}</p>
             )}
           </div>
         ))}
@@ -797,12 +798,10 @@ function ClientsTab() {
   );
 }
 
+const WEEKDAY_LABELS = ["Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота", "Воскресенье"];
+
 function WorkTab({ onSoundsChanged }: { onSoundsChanged: () => Promise<void> }) {
-  const [settings, setSettings] = useState<Record<string, string>>({
-    work_start_time: "12:00",
-    cutoff_regular: "22:45",
-    cutoff_grill: "21:45",
-  });
+  const [weeklySchedule, setWeeklySchedule] = useState<DayScheduleDto[]>([]);
   const [settingsRows, setSettingsRows] = useState<SettingDto[]>([]);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -813,10 +812,7 @@ function WorkTab({ onSoundsChanged }: { onSoundsChanged: () => Promise<void> }) 
     try {
       const response = await api.getSettings();
       setSettingsRows(response.settings);
-      setSettings((previous) => ({
-        ...previous,
-        ...Object.fromEntries(response.settings.map((setting) => [setting.key, setting.value])),
-      }));
+      setWeeklySchedule([...response.weekly_schedule].sort((left, right) => left.day_of_week - right.day_of_week));
       setError(null);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Не удалось загрузить настройки");
@@ -833,16 +829,13 @@ function WorkTab({ onSoundsChanged }: { onSoundsChanged: () => Promise<void> }) 
     event.preventDefault();
     setLoading(true);
     try {
-      const response = await api.updateSettings({
-        work_start_time: settings.work_start_time,
-        cutoff_regular: settings.cutoff_regular,
-        cutoff_grill: settings.cutoff_grill,
-      });
+      const response = await api.updateSettings({ weekly_schedule: weeklySchedule });
       setSettingsRows(response.settings);
-      setMessage("Настройки сохранены");
+      setWeeklySchedule([...response.weekly_schedule].sort((left, right) => left.day_of_week - right.day_of_week));
+      setMessage("Расписание сохранено");
       setError(null);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Не удалось сохранить настройки");
+      setError(caught instanceof Error ? caught.message : "Не удалось сохранить расписание");
     } finally {
       setLoading(false);
     }
@@ -870,31 +863,43 @@ function WorkTab({ onSoundsChanged }: { onSoundsChanged: () => Promise<void> }) 
       {error && <div className="notice error">{error}</div>}
 
       <form className="settings-form" onSubmit={(event) => void submit(event)}>
-        <label>
-          Начало работы
-          <input
-            type="time"
-            value={settings.work_start_time}
-            onChange={(event) => setSettings((previous) => ({ ...previous, work_start_time: event.target.value }))}
-          />
-        </label>
-        <label>
-          Стоп обычных заказов
-          <input
-            type="time"
-            value={settings.cutoff_regular}
-            onChange={(event) => setSettings((previous) => ({ ...previous, cutoff_regular: event.target.value }))}
-          />
-        </label>
-        <label>
-          Стоп гриля
-          <input
-            type="time"
-            value={settings.cutoff_grill}
-            onChange={(event) => setSettings((previous) => ({ ...previous, cutoff_grill: event.target.value }))}
-          />
-        </label>
-        <button type="submit" disabled={loading}>Сохранить</button>
+        <h3>Расписание по дням недели</h3>
+        <DataTable headers={["День", "Открытие", "Последний приём заказов"]}>
+          {weeklySchedule.map((day) => (
+            <tr key={day.day_of_week}>
+              <td>{WEEKDAY_LABELS[day.day_of_week - 1] ?? day.day_of_week}</td>
+              <td>
+                <input
+                  type="time"
+                  value={day.open_time.slice(0, 5)}
+                  onChange={(event) =>
+                    setWeeklySchedule((previous) =>
+                      previous.map((entry) =>
+                        entry.day_of_week === day.day_of_week ? { ...entry, open_time: event.target.value } : entry,
+                      ),
+                    )
+                  }
+                />
+              </td>
+              <td>
+                <input
+                  type="time"
+                  value={day.last_order_time.slice(0, 5)}
+                  onChange={(event) =>
+                    setWeeklySchedule((previous) =>
+                      previous.map((entry) =>
+                        entry.day_of_week === day.day_of_week
+                          ? { ...entry, last_order_time: event.target.value }
+                          : entry,
+                      ),
+                    )
+                  }
+                />
+              </td>
+            </tr>
+          ))}
+        </DataTable>
+        <button type="submit" disabled={loading || weeklySchedule.length !== 7}>Сохранить расписание</button>
       </form>
 
       <div className="sound-box">
