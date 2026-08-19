@@ -581,7 +581,7 @@ function ProductScreen({
         />
       </div>
       {showRemovals && (
-        <div className="modal-backdrop" onClick={() => setShowRemovals(false)}>
+        <div className="modal-backdrop modal-backdrop-content" style={{ top: topHeight }} onClick={() => setShowRemovals(false)}>
           <div className="modal modal-large removal-modal" onClick={(event) => event.stopPropagation()}>
             <strong className="removal-modal-title">НЕ КЛАСТЬ</strong>
             <div className="removal-list">
@@ -600,7 +600,9 @@ function ProductScreen({
                 );
               })}
             </div>
-            <MenuButton text="Готово" width={buttonWidth * 0.6} height={44} fontSize={18} onClick={() => setShowRemovals(false)} />
+            <div className="removal-modal-actions">
+              <MenuButton text="Готово" width={buttonWidth * 0.6} height={44} fontSize={18} onClick={() => setShowRemovals(false)} />
+            </div>
           </div>
         </div>
       )}

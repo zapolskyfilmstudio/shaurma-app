@@ -230,6 +230,13 @@ button.card {
   z-index: 20;
 }
 
+.modal-backdrop-content {
+  inset: auto;
+  left: 0;
+  right: 0;
+  bottom: 0;
+}
+
 .modal {
   width: min(100%, 420px);
   max-height: 80dvh;
@@ -244,10 +251,16 @@ button.card {
 }
 
 .modal-large {
-  width: 75vw;
-  height: 75dvh;
+  width: 75%;
+  height: 75%;
   max-width: none;
   max-height: none;
+}
+
+.removal-modal-actions {
+  display: flex;
+  justify-content: center;
+  width: 100%;
 }
 
 .removal-modal {
