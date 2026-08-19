@@ -61,6 +61,23 @@ const MENU_BUTTONS = [
   "МОИ ЗАКАЗЫ",
 ];
 
+function isShawarmaCategory(categoryName: string): boolean {
+  return normalizeMenuName(categoryName) === normalizeMenuName("ШАУРМА");
+}
+
+function isInstantCategory(categoryName: string): boolean {
+  const name = normalizeMenuName(categoryName);
+  return name === normalizeMenuName("НАПИТКИ") || name === normalizeMenuName("ДОПОЛНИТЕЛЬНО");
+}
+
+function formatMenuItemMeta(item: MenuItemDto, categoryName: string): string {
+  const parts = [formatMoney(item.price), `${item.weight} г`];
+  if (!isInstantCategory(categoryName) && item.cooking_time > 0) {
+    parts.push(`${item.cooking_time} мин`);
+  }
+  return parts.join(" · ");
+}
+
 function paymentStatusLabel(status: string): string {
   switch (status) {
     case "WAITING":
@@ -290,9 +307,7 @@ function App() {
             >
               <strong>{item.name}</strong>
               {item.description && <p className="text-muted">{item.description}</p>}
-              <p>
-                {formatMoney(item.price)} · {item.weight} г · {item.cooking_time} мин
-              </p>
+              <p>{formatMenuItemMeta(item, category?.name ?? "")}</p>
             </button>
           ))}
         </div>
@@ -478,9 +493,8 @@ function ProductScreen({
   cartCount: number;
 }) {
   const resolved = item;
-  const [selectedAdditions, setSelectedAdditions] = useState<number[]>([]);
   const [selectedRemovals, setSelectedRemovals] = useState<number[]>([]);
-  const [showOptions, setShowOptions] = useState(false);
+  const [showRemovals, setShowRemovals] = useState(false);
   const [adding, setAdding] = useState(false);
 
   if (!resolved) {
@@ -494,10 +508,10 @@ function ProductScreen({
     );
   }
 
-  const additionsPrice = resolved.additions
-    .filter((addition) => selectedAdditions.includes(addition.id))
-    .reduce((sum, addition) => sum + addition.price, 0);
-  const totalPrice = resolved.price + additionsPrice;
+  const categoryName = resolved.category.name;
+  const showRemovalsOption = isShawarmaCategory(categoryName);
+
+  const totalPrice = resolved.price;
 
   const addToCart = () => {
     setAdding(true);
@@ -508,12 +522,9 @@ function ProductScreen({
       price: resolved.price,
       weight: resolved.weight,
       cookingTime: resolved.cooking_time,
-      additionsIds: selectedAdditions,
+      additionsIds: [],
       removalsIds: selectedRemovals,
-      additionNames: resolved.additions
-        .filter((addition) => selectedAdditions.includes(addition.id))
-        .map((addition) => addition.name)
-        .join(", "),
+      additionNames: "",
       removalNames: resolved.removals
         .filter((removal) => selectedRemovals.includes(removal.id))
         .map((removal) => removal.name)
@@ -524,6 +535,10 @@ function ProductScreen({
     setAdding(false);
   };
 
+  const productMeta = isInstantCategory(categoryName)
+    ? `${resolved.weight} г`
+    : `${resolved.weight} г · готовится ${resolved.cooking_time} мин`;
+
   return (
     <ScreenLayout topHeight={topHeight} left="home" right="cart" onLeft={goMain} onRight={goCart} cartCount={cartCount}>
       <div className="product-screen">
@@ -532,11 +547,11 @@ function ProductScreen({
         </button>
         <h2>{resolved.name}</h2>
         {resolved.description && <p className="text-muted">{resolved.description}</p>}
-        <p>
-          {resolved.weight} г · готовится {resolved.cooking_time} мин
-        </p>
+        <p>{productMeta}</p>
         <p>Цена: {formatMoney(totalPrice)}</p>
-        <MenuButton text="Дополнительно / убрать" width={buttonWidth} height={buttonHeight} fontSize={18} onClick={() => setShowOptions(true)} />
+        {showRemovalsOption && resolved.removals.length > 0 && (
+          <MenuButton text="НЕ КЛАСТЬ" width={buttonWidth} height={buttonHeight} fontSize={18} onClick={() => setShowRemovals(true)} />
+        )}
         <MenuButton
           text={adding ? "Добавляем..." : "Добавить в корзину"}
           width={buttonWidth}
@@ -546,26 +561,9 @@ function ProductScreen({
           onClick={addToCart}
         />
       </div>
-      {showOptions && (
-        <div className="modal-backdrop" onClick={() => setShowOptions(false)}>
+      {showRemovals && (
+        <div className="modal-backdrop" onClick={() => setShowRemovals(false)}>
           <div className="modal" onClick={(event) => event.stopPropagation()}>
-            <strong>Добавить</strong>
-            {resolved.additions.map((addition) => (
-              <label key={addition.id} className="check-row">
-                <span>
-                  {addition.name} +{formatMoney(addition.price)}
-                </span>
-                <input
-                  type="checkbox"
-                  checked={selectedAdditions.includes(addition.id)}
-                  onChange={() =>
-                    setSelectedAdditions((current) =>
-                      current.includes(addition.id) ? current.filter((id) => id !== addition.id) : [...current, addition.id],
-                    )
-                  }
-                />
-              </label>
-            ))}
             <strong>Не класть</strong>
             {resolved.removals.map((removal) => (
               <label key={removal.id} className="check-row">
@@ -581,7 +579,7 @@ function ProductScreen({
                 />
               </label>
             ))}
-            <MenuButton text="Готово" width={buttonWidth * 0.6} height={44} fontSize={18} onClick={() => setShowOptions(false)} />
+            <MenuButton text="Готово" width={buttonWidth * 0.6} height={44} fontSize={18} onClick={() => setShowRemovals(false)} />
           </div>
         </div>
       )}
@@ -749,7 +747,6 @@ function CartScreen({
         {cart.map((item) => (
           <div key={item.id} className="card" style={{ width: contentWidth }}>
             <strong>{item.name}</strong>
-            {item.additionNames && <p>Добавки: {item.additionNames}</p>}
             {item.removalNames && <p>Не класть: {item.removalNames}</p>}
             <p>
               Вес: {item.weight} г · Цена: {formatMoney(item.totalPrice)}
