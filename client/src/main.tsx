@@ -50,6 +50,7 @@ import type {
   DayScheduleDto,
   MenuItemDto,
   OrderDto,
+  SbpBankDto,
 } from "./types";
 import "./styles.css";
 
@@ -264,6 +265,18 @@ function App() {
 
   const cartCount = cart.length;
 
+  const goOrdersAfterPaymentError = useCallback(() => {
+    clearPendingOrderId();
+    navigate({ name: "orders" });
+  }, [navigate]);
+
+  const finishPaidOrder = useCallback(() => {
+    clearCartDraft();
+    setCart([]);
+    clearPendingOrderId();
+    navigate({ name: "orders" });
+  }, [navigate]);
+
   if (route.name === "startup") {
     return (
       <div className="screen centered-column">
@@ -374,12 +387,26 @@ function App() {
           navigate({ name: "product", itemId: menuItemId });
         }}
         onCartChange={persistCart}
-        onOrdered={() => {
-          clearCartDraft();
-          setCart([]);
-          navigate({ name: "orders" });
+        onCheckout={(publicId, totalPrice) => {
+          setPendingOrderId(publicId);
+          navigate({ name: "checkout", publicId, totalPrice });
         }}
+        onPaid={finishPaidOrder}
         paymentEnabled={paymentEnabled}
+      />
+    );
+  }
+
+  if (route.name === "checkout") {
+    return (
+      <CheckoutScreen
+        topHeight={topHeight}
+        viewport={viewport}
+        publicId={route.publicId}
+        totalPrice={route.totalPrice}
+        onHome={goMain}
+        onPaid={finishPaidOrder}
+        onFailed={goOrdersAfterPaymentError}
       />
     );
   }
@@ -393,10 +420,8 @@ function App() {
         result={route.result}
         publicId={route.publicId}
         onHome={goMain}
-        onOrders={() => {
-          clearPendingOrderId();
-          navigate({ name: "orders" });
-        }}
+        onPaid={finishPaidOrder}
+        onFailed={goOrdersAfterPaymentError}
         cartCount={cartCount}
       />
     );
@@ -409,6 +434,10 @@ function App() {
         viewport={viewport}
         onHome={goMain}
         onCart={goCart}
+        onCheckout={(publicId, totalPrice) => {
+          setPendingOrderId(publicId);
+          navigate({ name: "checkout", publicId, totalPrice });
+        }}
         paymentEnabled={paymentEnabled}
         cartCount={cartCount}
       />
@@ -643,7 +672,8 @@ function CartScreen({
   onProfile,
   onEdit,
   onCartChange,
-  onOrdered,
+  onCheckout,
+  onPaid,
   paymentEnabled,
 }: {
   cart: CartItem[];
@@ -655,7 +685,8 @@ function CartScreen({
   onProfile: () => void;
   onEdit: (menuItemId: number) => void;
   onCartChange: (items: CartItem[]) => void;
-  onOrdered: () => void;
+  onCheckout: (publicId: string, totalPrice: number) => void;
+  onPaid: () => void;
   paymentEnabled: boolean;
 }) {
   const initialDraft = useMemo(() => loadCartDraft(), []);
@@ -772,6 +803,7 @@ function CartScreen({
     if (!isTimeValid) return;
     setSubmitting(true);
     setError(null);
+    const orderTotal = cart.reduce((sum, item) => sum + item.totalPrice, 0);
     try {
       const result = await api.createOrder({
         requested_time: requestedTime,
@@ -782,8 +814,12 @@ function CartScreen({
           removals_ids: item.removalsIds,
         })),
       });
-      if (result.payment_status === "PAID" || result.payment_status === "WAITING") {
-        onOrdered();
+      if (result.payment_status === "PAID") {
+        onPaid();
+        return;
+      }
+      if (result.payment_status === "WAITING") {
+        onCheckout(result.public_id, orderTotal);
         return;
       }
       setError("Не удалось оформить заказ. Попробуйте позже.");
@@ -926,11 +962,184 @@ function CartScreen({
   );
 }
 
+function CheckoutScreen({
+  topHeight,
+  viewport,
+  publicId,
+  totalPrice,
+  onHome,
+  onPaid,
+  onFailed,
+}: {
+  topHeight: number;
+  viewport: { width: number; height: number };
+  publicId: string;
+  totalPrice: number;
+  onHome: () => void;
+  onPaid: () => void;
+  onFailed: () => void;
+}) {
+  const contentWidth = viewport.width * 0.9;
+  const optionHeight = viewport.height * 0.85 * 0.12;
+  const [paymentUrl, setPaymentUrl] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [statusMessage, setStatusMessage] = useState("Выберите способ оплаты");
+  const [banks, setBanks] = useState<SbpBankDto[]>([]);
+  const [banksLoading, setBanksLoading] = useState(false);
+  const [sbpExpanded, setSbpExpanded] = useState(false);
+  const finishedRef = useRef(false);
+
+  const finishPaid = useCallback(() => {
+    if (finishedRef.current) return;
+    finishedRef.current = true;
+    onPaid();
+  }, [onPaid]);
+
+  const finishFailed = useCallback(() => {
+    if (finishedRef.current) return;
+    finishedRef.current = true;
+    onFailed();
+  }, [onFailed]);
+
+  useEffect(() => {
+    setPendingOrderId(publicId);
+    let cancelled = false;
+    const init = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const payment = await api.retryPayment(publicId);
+        if (cancelled) return;
+        if (payment.payment_status === "PAID") {
+          setStatusMessage("Оплата подтверждена");
+          finishPaid();
+          return;
+        }
+        setPaymentUrl(payment.payment_url ?? null);
+      } catch (caught) {
+        if (!cancelled) {
+          setError(caught instanceof Error ? caught.message : "Не удалось подготовить оплату");
+          finishFailed();
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+    void init();
+    return () => {
+      cancelled = true;
+    };
+  }, [publicId, finishPaid, finishFailed]);
+
+  useEffect(() => {
+    let cancelled = false;
+    let timer = 0;
+    const poll = async () => {
+      try {
+        const status = await api.getPaymentStatus(publicId);
+        if (cancelled || finishedRef.current) return;
+        if (status.payment_status === "PAID") {
+          setStatusMessage("Оплата подтверждена");
+          finishPaid();
+          return;
+        }
+        if (status.payment_status === "FAILED") {
+          setStatusMessage("Оплата не прошла");
+          finishFailed();
+          return;
+        }
+        timer = window.setTimeout(poll, 2000);
+      } catch {
+        if (!cancelled && !finishedRef.current) {
+          timer = window.setTimeout(poll, 3000);
+        }
+      }
+    };
+    void poll();
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [publicId, finishPaid, finishFailed]);
+
+  const openSbp = async () => {
+    setSbpExpanded(true);
+    setBanksLoading(true);
+    setError(null);
+    setStatusMessage("Выберите банк для оплаты через СБП");
+    try {
+      const response = await api.getSbpBanks(publicId);
+      setBanks(response.banks);
+      if (response.banks.length === 0) {
+        const link = await api.getSbpLink(publicId);
+        window.location.href = link.link;
+      }
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Не удалось открыть СБП");
+      finishFailed();
+    } finally {
+      setBanksLoading(false);
+    }
+  };
+
+  const payWithBank = async (bankId: string) => {
+    setError(null);
+    setStatusMessage("Откройте приложение банка и подтвердите оплату");
+    try {
+      const link = await api.getSbpLink(publicId, bankId);
+      window.location.href = link.link;
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Не удалось открыть оплату через СБП");
+      finishFailed();
+    }
+  };
+
+  const openCard = () => {
+    if (!paymentUrl) {
+      setError("Не удалось получить ссылку на оплату картой");
+      finishFailed();
+      return;
+    }
+    setStatusMessage("Переходим к оплате картой...");
+    window.location.href = paymentUrl;
+  };
+
+  return (
+    <ScreenLayout topHeight={topHeight} left="home" right="home" onLeft={onHome} onRight={onHome}>
+      <div className="checkout-screen" style={{ width: contentWidth }}>
+        <h2>Оплата заказа {publicId}</h2>
+        <p className="checkout-amount">{formatMoney(totalPrice)}</p>
+        <p className="text-muted">{statusMessage}</p>
+        {loading && <div className="spinner" />}
+        <button type="button" className="checkout-option" style={{ height: optionHeight }} disabled={loading} onClick={() => void openSbp()}>
+          Система Быстрых Платежей
+        </button>
+        <button type="button" className="checkout-option" style={{ height: optionHeight }} disabled={loading || !paymentUrl} onClick={openCard}>
+          Перевод по карте
+        </button>
+        {banksLoading && <div className="spinner" />}
+        {sbpExpanded && banks.length > 0 && (
+          <div className="checkout-banks">
+            {banks.map((bank) => (
+              <button key={bank.bank_id} type="button" className="checkout-bank" onClick={() => void payWithBank(bank.bank_id)}>
+                {bank.bank_name}
+              </button>
+            ))}
+          </div>
+        )}
+        {error && <p className="text-error">{error}</p>}
+      </div>
+    </ScreenLayout>
+  );
+}
+
 function OrdersScreen({
   topHeight,
   viewport,
   onHome,
   onCart,
+  onCheckout,
   paymentEnabled,
   cartCount,
 }: {
@@ -938,6 +1147,7 @@ function OrdersScreen({
   viewport: { width: number; height: number };
   onHome: () => void;
   onCart: () => void;
+  onCheckout: (publicId: string, totalPrice: number) => void;
   paymentEnabled: boolean;
   cartCount: number;
 }) {
@@ -962,18 +1172,12 @@ function OrdersScreen({
     return () => window.clearInterval(timer);
   }, [loadOrders]);
 
-  const pay = async (publicId: string) => {
-    setPayingId(publicId);
+  const pay = async (order: OrderDto) => {
+    setPayingId(order.public_id);
     setError(null);
     try {
-      setPendingOrderId(publicId);
-      const response = await api.retryPayment(publicId);
-      if (response.payment_url) {
-        window.location.href = response.payment_url;
-        return;
-      }
-      clearPendingOrderId();
-      loadOrders();
+      setPendingOrderId(order.public_id);
+      onCheckout(order.public_id, order.total_price);
     } catch (caught) {
       clearPendingOrderId();
       setError(caught instanceof Error ? caught.message : "Не удалось открыть оплату");
@@ -1023,7 +1227,7 @@ function OrdersScreen({
                     height={buttonHeight}
                     fontSize={20}
                     enabled={payingId == null && cancellingId == null}
-                    onClick={() => void pay(order.public_id)}
+                    onClick={() => void pay(order)}
                   />
                   <MenuButton
                     text={cancellingId === order.public_id ? "Отмена..." : "Отменить"}
@@ -1051,7 +1255,8 @@ function PaymentScreen({
   result,
   publicId,
   onHome,
-  onOrders,
+  onPaid,
+  onFailed,
   cartCount,
 }: {
   topHeight: number;
@@ -1060,32 +1265,43 @@ function PaymentScreen({
   result: "success" | "fail";
   publicId: string;
   onHome: () => void;
-  onOrders: () => void;
+  onPaid: () => void;
+  onFailed: () => void;
   cartCount: number;
 }) {
   const [message, setMessage] = useState(result === "success" ? "Проверяем оплату..." : "Оплата не прошла");
-  const [paymentStatus, setPaymentStatus] = useState<string | null>(null);
-  const [retrying, setRetrying] = useState(false);
+  const [paymentStatus, setPaymentStatus] = useState<string | null>(result === "fail" ? "FAILED" : null);
   const [error, setError] = useState<string | null>(null);
+  const finishedRef = useRef(false);
+
+  useEffect(() => {
+    if (result === "fail") {
+      onFailed();
+    }
+  }, [result, onFailed]);
 
   useEffect(() => {
     if (result !== "success") return;
     let cancelled = false;
+    let timer = 0;
     const poll = async () => {
       try {
         const status = await api.getPaymentStatus(publicId);
-        if (cancelled) return;
+        if (cancelled || finishedRef.current) return;
         setPaymentStatus(status.payment_status);
         if (status.payment_status === "PAID") {
-          clearPendingOrderId();
           setMessage(`Заказ ${publicId} оплачен и отправлен на кухню`);
+          finishedRef.current = true;
+          onPaid();
           return;
         }
         if (status.payment_status === "FAILED") {
           setMessage("Оплата не подтверждена");
+          finishedRef.current = true;
+          onFailed();
           return;
         }
-        window.setTimeout(poll, 2000);
+        timer = window.setTimeout(poll, 2000);
       } catch (caught) {
         if (!cancelled) {
           setError(caught instanceof Error ? caught.message : "Не удалось проверить оплату");
@@ -1095,57 +1311,17 @@ function PaymentScreen({
     void poll();
     return () => {
       cancelled = true;
+      window.clearTimeout(timer);
     };
-  }, [publicId, result]);
-
-  const retry = async () => {
-    setRetrying(true);
-    setError(null);
-    try {
-      const response = await api.retryPayment(publicId);
-      if (response.payment_url) {
-        setPendingOrderId(publicId);
-        window.location.href = response.payment_url;
-        return;
-      }
-      setMessage(`Заказ ${publicId} оплачен`);
-      setPaymentStatus("PAID");
-      clearPendingOrderId();
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Не удалось повторить оплату");
-    } finally {
-      setRetrying(false);
-    }
-  };
+  }, [publicId, result, onPaid, onFailed]);
 
   return (
-    <ScreenLayout topHeight={topHeight} left="home" right="cart" onLeft={onHome} onRight={onOrders} cartCount={cartCount}>
+    <ScreenLayout topHeight={topHeight} left="home" right="cart" onLeft={onHome} onRight={onHome} cartCount={cartCount}>
       <div className="centered-column" style={{ width: buttonWidth }}>
         <h2>{result === "success" ? "Оплата" : "Оплата не прошла"}</h2>
         <p>{message}</p>
-        {paymentStatus === "PAID" && (
-          <MenuButton text="Мои заказы" width={buttonWidth} height={buttonHeight} fontSize={24} onClick={onOrders} />
-        )}
-        {(result === "fail" || paymentStatus === "FAILED") && (
-          <>
-            <MenuButton
-              text={retrying ? "Открываем оплату..." : "Попробовать снова"}
-              width={buttonWidth}
-              height={buttonHeight}
-              fontSize={24}
-              enabled={!retrying}
-              onClick={() => void retry()}
-            />
-            <MenuButton
-              text="Мои заказы"
-              width={buttonWidth}
-              height={buttonHeight}
-              fontSize={24}
-              onClick={onOrders}
-            />
-          </>
-        )}
         {error && <p className="text-error">{error}</p>}
+        {paymentStatus === "PAID" && <p className="text-muted">Переходим в «Мои заказы»...</p>}
       </div>
     </ScreenLayout>
   );

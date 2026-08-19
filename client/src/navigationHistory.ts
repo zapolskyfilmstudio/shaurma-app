@@ -8,6 +8,7 @@ export type AppRoute =
   | { name: "cart" }
   | { name: "orders" }
   | { name: "profile" }
+  | { name: "checkout"; publicId: string; totalPrice: number }
   | { name: "payment"; result: "success" | "fail"; publicId: string };
 
 type HistoryState = {
@@ -27,6 +28,8 @@ export function serializeRoute(route: AppRoute): string {
       return `missing:${route.title}`;
     case "payment":
       return `payment:${route.result}:${route.publicId}`;
+    case "checkout":
+      return `checkout:${route.publicId}:${route.totalPrice}`;
     default:
       return route.name;
   }
@@ -47,6 +50,16 @@ export function deserializeRoute(key: string): AppRoute | null {
   }
   if (key.startsWith("missing:")) {
     return { name: "missing", title: key.slice("missing:".length) };
+  }
+  if (key.startsWith("checkout:")) {
+    const rest = key.slice("checkout:".length);
+    const separator = rest.lastIndexOf(":");
+    if (separator === -1) return null;
+    const publicId = rest.slice(0, separator);
+    const totalPrice = Number(rest.slice(separator + 1));
+    if (publicId && Number.isFinite(totalPrice)) {
+      return { name: "checkout", publicId, totalPrice };
+    }
   }
   if (key.startsWith("payment:")) {
     const rest = key.slice("payment:".length);
@@ -79,6 +92,8 @@ export function routeToHash(route: AppRoute): string {
       return `#/missing/${encodeURIComponent(route.title)}`;
     case "payment":
       return `#/payment/${route.result}/${encodeURIComponent(route.publicId)}`;
+    case "checkout":
+      return `#/checkout/${encodeURIComponent(route.publicId)}/${route.totalPrice}`;
     default:
       return MAIN_HASH;
   }
@@ -107,6 +122,13 @@ export function hashToRoute(hash: string): AppRoute | null {
   if (head === "payment" && (second === "success" || second === "fail")) {
     const publicId = decodeURIComponent(segments.slice(2).join("/"));
     if (publicId) return { name: "payment", result: second, publicId };
+  }
+  if (head === "checkout" && second) {
+    const publicId = decodeURIComponent(second);
+    const totalPrice = Number(segments[2]);
+    if (publicId && Number.isFinite(totalPrice)) {
+      return { name: "checkout", publicId, totalPrice };
+    }
   }
   return null;
 }

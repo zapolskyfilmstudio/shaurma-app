@@ -3,6 +3,8 @@ import type {
   InitResponse,
   MenuResponse,
   OrdersResponse,
+  SbpBanksResponse,
+  SbpLinkResponse,
   PaymentStatusResponse,
   PendingOrderResponse,
   PublicConfigResponse,
@@ -58,6 +60,15 @@ export const api = {
 
   getPaymentStatus: (publicId: string) =>
     request<PaymentStatusResponse>(`/api/order/${encodeURIComponent(publicId)}/payment`),
+
+  getSbpBanks: (publicId: string) =>
+    request<SbpBanksResponse>(`/api/order/${encodeURIComponent(publicId)}/payment/sbp/banks`),
+
+  getSbpLink: (publicId: string, bankId?: string) =>
+    request<SbpLinkResponse>(`/api/order/${encodeURIComponent(publicId)}/payment/sbp`, {
+      method: "POST",
+      body: JSON.stringify(bankId ? { bank_id: bankId } : {}),
+    }),
 
   retryPayment: (publicId: string) =>
     request<CreateOrderResponse>(`/api/order/${encodeURIComponent(publicId)}/pay`, { method: "POST" }),

@@ -87,6 +87,20 @@ export interface CreateOrderResponse {
   payment_url?: string | null;
 }
 
+export interface SbpBankDto {
+  bank_id: string;
+  bank_name: string;
+  bank_logo?: string | null;
+}
+
+export interface SbpBanksResponse {
+  banks: SbpBankDto[];
+}
+
+export interface SbpLinkResponse {
+  link: string;
+}
+
 export interface PaymentStatusResponse {
   public_id: string;
   payment_status: string;

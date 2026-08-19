@@ -314,6 +314,24 @@ class ApiException(
     val paymentStatus: String,
     val status: String,
 )
+
+@Serializable data class SbpBankDto(
+    val bankId: String,
+    val bankName: String,
+    val bankLogo: String? = null,
+)
+
+@Serializable data class SbpBanksResponse(
+    val banks: List<SbpBankDto>,
+)
+
+@Serializable data class SbpLinkRequest(
+    val bankId: String? = null,
+)
+
+@Serializable data class SbpLinkResponse(
+    val link: String,
+)
 @Serializable data class OrdersResponse(val orders: List<OrderDto>)
 @Serializable data class KitchenOrdersResponse(val orders: List<KitchenOrderDto>)
 @Serializable data class OrderDto(
@@ -435,6 +453,7 @@ private data class OrderRow(
     val status: String,
     val paymentStatus: String,
     val tbankPaymentId: Long?,
+    val tbankPaymentUrl: String?,
     val paidAt: Long?,
     val createdAt: Long,
     val updatedAt: Long,
@@ -614,6 +633,41 @@ private fun Route.publicRoutes(config: AppConfig, database: AppDatabase, tbankCl
         call.respond(response)
     }
 
+    get("/order/{public_id}/payment/sbp/banks") {
+        val publicId = call.parameters["public_id"]
+            ?: throw ApiException(HttpStatusCode.BadRequest, "BAD_REQUEST", "public_id is required")
+        val deviceId = call.deviceIdHeader()
+        val userAgent = call.request.headers["User-Agent"].orEmpty()
+        val deviceType = if (userAgent.contains("Mobile", ignoreCase = true)) "mobile" else "desktop"
+        val deviceOs = when {
+            userAgent.contains("Android", ignoreCase = true) -> "Android"
+            userAgent.contains("iPhone", ignoreCase = true) || userAgent.contains("iPad", ignoreCase = true) -> "iOS"
+            userAgent.contains("Windows", ignoreCase = true) -> "Windows"
+            userAgent.contains("Mac", ignoreCase = true) -> "macOS"
+            else -> "Web"
+        }
+        ensureOrderPayment(config, tbankClient, database, publicId, deviceId)
+        val banks = tbankClient.getSbpBankList(deviceType, deviceOs).map {
+            SbpBankDto(bankId = it.bankId, bankName = it.bankName, bankLogo = it.bankLogo)
+        }
+        call.respond(SbpBanksResponse(banks = banks))
+    }
+
+    post("/order/{public_id}/payment/sbp") {
+        val publicId = call.parameters["public_id"]
+            ?: throw ApiException(HttpStatusCode.BadRequest, "BAD_REQUEST", "public_id is required")
+        val deviceId = call.deviceIdHeader()
+        val request = call.receive<SbpLinkRequest>()
+        ensureOrderPayment(config, tbankClient, database, publicId, deviceId)
+        val paymentId = database.read { connection ->
+            val order = requireOrderForPayment(connection, publicId, deviceId)
+            order.tbankPaymentId
+                ?: throw ApiException(HttpStatusCode.BadRequest, "PAYMENT_NOT_INITIATED", "Payment is not initiated")
+        }
+        val link = tbankClient.getSbpPaymentLink(paymentId, request.bankId?.trim()?.takeIf { it.isNotEmpty() })
+        call.respond(SbpLinkResponse(link = link.link))
+    }
+
     post("/order/{public_id}/pay") {
         val publicId = call.parameters["public_id"]
             ?: throw ApiException(HttpStatusCode.BadRequest, "BAD_REQUEST", "public_id is required")
@@ -644,7 +698,7 @@ private fun Route.publicRoutes(config: AppConfig, database: AppDatabase, tbankCl
                 "Онлайн-оплата не настроена. Укажите TBANK_TERMINAL_KEY и TBANK_PASSWORD в .env и перезапустите backend.",
             )
         }
-        val payment = initiateOrderPayment(config, tbankClient, database, created)
+        val payment = ensureOrderPayment(config, tbankClient, database, created.publicId, deviceId)
         call.respond(
             CreateOrderResponse(
                 publicId = created.publicId,
@@ -1034,13 +1088,14 @@ private suspend fun initiateOrderPayment(
         connection.prepareStatement(
             """
             UPDATE orders
-            SET tbank_payment_id = ?, payment_status = 'WAITING', updated_at = ?
+            SET tbank_payment_id = ?, tbank_payment_url = ?, payment_status = 'WAITING', updated_at = ?
             WHERE id = ? AND payment_status IN ('WAITING', 'FAILED')
             """.trimIndent()
         ).use { statement ->
             statement.setLong(1, initResult.paymentId)
-            statement.setLong(2, now)
-            statement.setLong(3, created.id)
+            statement.setString(2, initResult.paymentUrl)
+            statement.setLong(3, now)
+            statement.setLong(4, created.id)
             statement.executeUpdate()
         }
         now
@@ -1050,6 +1105,54 @@ private suspend fun initiateOrderPayment(
         paymentUrl = initResult.paymentUrl,
         updatedAt = updatedAt,
     )
+}
+
+private suspend fun ensureOrderPayment(
+    config: AppConfig,
+    tbankClient: TBankClient,
+    database: AppDatabase,
+    publicId: String,
+    deviceId: UUID,
+): OrderPaymentResult {
+    val order = database.read { connection ->
+        requireOrderForPayment(connection, publicId, deviceId)
+    }
+    if (order.paymentStatus == "PAID") {
+        throw ApiException(HttpStatusCode.BadRequest, "ALREADY_PAID", "Order is already paid")
+    }
+    if (order.tbankPaymentId != null && order.paymentStatus == "WAITING" && !order.tbankPaymentUrl.isNullOrBlank()) {
+        return OrderPaymentResult(
+            paymentStatus = order.paymentStatus,
+            paymentUrl = order.tbankPaymentUrl,
+            updatedAt = order.updatedAt,
+        )
+    }
+    return initiateOrderPayment(
+        config,
+        tbankClient,
+        database,
+        CreatedOrder(
+            id = order.id,
+            publicId = order.publicId,
+            totalPrice = order.totalPrice,
+            updatedAt = order.updatedAt,
+        ),
+    )
+}
+
+private fun requireOrderForPayment(connection: Connection, publicId: String, deviceId: UUID): OrderRow {
+    val order = findOrderByPublicId(connection, publicId)
+        ?: throw ApiException(HttpStatusCode.NotFound, "ORDER_NOT_FOUND", "Order not found")
+    if (order.deviceId != deviceId) {
+        throw ApiException(HttpStatusCode.Forbidden, "ORDER_FORBIDDEN", "Order does not belong to this device")
+    }
+    if (order.paymentStatus == "PAID") {
+        throw ApiException(HttpStatusCode.BadRequest, "ALREADY_PAID", "Order is already paid")
+    }
+    if (order.paymentStatus == "CANCELLED") {
+        throw ApiException(HttpStatusCode.BadRequest, "ORDER_CANCELLED", "Order is cancelled")
+    }
+    return order
 }
 
 private suspend fun handleTBankNotification(
@@ -2081,6 +2184,7 @@ private fun ResultSet.toOrderRow(client: ClientDto? = null): OrderRow = OrderRow
     status = getString("status"),
     paymentStatus = getString("payment_status"),
     tbankPaymentId = getObject("tbank_payment_id")?.let { (it as Number).toLong() },
+    tbankPaymentUrl = getString("tbank_payment_url"),
     paidAt = getObject("paid_at")?.let { (it as Number).toLong() },
     createdAt = getLong("created_at"),
     updatedAt = getLong("updated_at"),
