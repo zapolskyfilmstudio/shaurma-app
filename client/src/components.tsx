@@ -90,9 +90,7 @@ export function ScreenLayout({
         topHeight={topHeight}
         cartCount={cartCount}
       />
-      <div className="content-zone" style={{ height: `calc(100% - ${topHeight}px)` }}>
-        {children}
-      </div>
+      <div className="content-zone">{children}</div>
     </div>
   );
 }

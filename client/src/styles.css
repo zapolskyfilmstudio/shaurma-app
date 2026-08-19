@@ -17,8 +17,8 @@ html,
 body,
 #root {
   margin: 0;
-  min-height: 100%;
   height: 100%;
+  overflow: hidden;
   background: #000;
   color: #fff;
 }
@@ -35,18 +35,28 @@ button {
 }
 
 .screen {
-  min-height: 100dvh;
+  height: 100dvh;
+  max-height: 100dvh;
+  overflow: hidden;
   background: #000;
   display: flex;
   flex-direction: column;
 }
 
 .content-zone {
-  overflow: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
   font-size: 150%;
 }
 
 .top-zone {
+  position: sticky;
+  top: 0;
+  z-index: 100;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -89,7 +99,18 @@ button {
 }
 
 .screen > .centered-column {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   font-size: 150%;
+}
+
+.screen.centered-column {
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .screen > .centered-column .menu-btn {
