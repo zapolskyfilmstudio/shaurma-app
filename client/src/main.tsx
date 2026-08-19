@@ -449,6 +449,7 @@ function MainScreen({
             }}
           />
         ))}
+        <p className="seo-footer text-muted">МегаШаверма · официальный сайт мегашаверма.рф</p>
       </div>
     </ScreenLayout>
   );
