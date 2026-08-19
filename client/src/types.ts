@@ -6,12 +6,19 @@ export interface InitResponse {
   server_time: number;
 }
 
+export interface DayScheduleDto {
+  day_of_week: number;
+  open_time: string;
+  last_order_time: string;
+}
+
 export interface PublicConfigResponse {
   server_time: number;
   work_start_time: string;
   cutoff_time: string;
   is_open: boolean;
   payment_enabled: boolean;
+  weekly_schedule: DayScheduleDto[];
 }
 
 export interface MenuResponse {

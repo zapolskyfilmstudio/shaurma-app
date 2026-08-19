@@ -20,15 +20,16 @@ import {
   allowedDates,
   allowedHourRange,
   allowedMinuteRange,
+  canSubmitOrderForSelectedDate,
+  clampRequestedTime,
+  findEarliestValidSlot,
   formatDateTime,
   formatMoney,
-  isCafeOpen,
-  maximumRequestedTime,
-  minimumRequestedTime,
   monthNameRu,
   moscowToMs,
   normalizeMenuName,
-  parseTimeToMinutes,
+  pickupBoundsForDate,
+  scheduleForDate,
   toMoscowParts,
 } from "./timeRules";
 import {
@@ -44,6 +45,7 @@ import type {
   CartItem,
   CategoryDto,
   ClientProfile,
+  DayScheduleDto,
   MenuItemDto,
   OrderDto,
 } from "./types";
@@ -140,9 +142,7 @@ function App() {
   const [profile, setProfile] = useState<ClientProfile | null>(loadProfile());
   const [categories, setCategories] = useState<CategoryDto[]>([]);
   const [cart, setCart] = useState<CartItem[]>(() => loadCartDraft().items);
-  const [workStart, setWorkStart] = useState("00:00");
-  const [cutoff, setCutoff] = useState("23:00");
-  const [isOpen, setIsOpen] = useState(true);
+  const [weeklySchedule, setWeeklySchedule] = useState<DayScheduleDto[]>([]);
   const [paymentEnabled, setPaymentEnabled] = useState(false);
   const [serverOffset, setServerOffset] = useState(profile?.serverTimeOffsetMs ?? 0);
 
@@ -227,9 +227,7 @@ function App() {
     setServerOffset(offset);
     setProfile(nextProfile);
     saveProfile(nextProfile);
-    setWorkStart(config.work_start_time);
-    setCutoff(config.cutoff_time);
-    setIsOpen(config.is_open);
+    setWeeklySchedule(config.weekly_schedule ?? []);
     setPaymentEnabled(config.payment_enabled);
     setCategories(menu.categories);
     if (init.is_blocked) {
@@ -366,9 +364,7 @@ function App() {
         topHeight={topHeight}
         viewport={viewport}
         serverNow={serverNow}
-        workStart={workStart}
-        cutoff={cutoff}
-        isOpen={isOpen}
+        weeklySchedule={weeklySchedule}
         onHome={goMain}
         onProfile={goProfile}
         onEdit={(menuItemId) => {
@@ -640,9 +636,7 @@ function CartScreen({
   topHeight,
   viewport,
   serverNow,
-  workStart,
-  cutoff,
-  isOpen,
+  weeklySchedule,
   onHome,
   onProfile,
   onEdit,
@@ -654,9 +648,7 @@ function CartScreen({
   topHeight: number;
   viewport: { width: number; height: number };
   serverNow: () => number;
-  workStart: string;
-  cutoff: string;
-  isOpen: boolean;
+  weeklySchedule: DayScheduleDto[];
   onHome: () => void;
   onProfile: () => void;
   onEdit: (menuItemId: number) => void;
@@ -675,13 +667,18 @@ function CartScreen({
   const [fontSize, setFontSize] = useState(22);
   const userPickedTime = useRef(initialDraft.requestedTime != null);
   const maxCooking = cart.length ? Math.max(...cart.map((item) => item.cookingTime)) : 0;
-  const minTime = minimumRequestedTime(serverNow(), maxCooking);
-  const maxTime = maximumRequestedTime(serverNow());
+  const scheduleReady = weeklySchedule.length === 7;
+
+  const earliestSlot = useMemo(() => {
+    if (!scheduleReady) return serverNow();
+    return findEarliestValidSlot(serverNow(), maxCooking, weeklySchedule);
+  }, [scheduleReady, serverNow, maxCooking, weeklySchedule]);
+
   const [requestedTime, setRequestedTime] = useState(() => {
-    if (initialDraft.requestedTime != null && initialDraft.requestedTime >= minTime && initialDraft.requestedTime <= maxTime) {
-      return initialDraft.requestedTime;
+    if (initialDraft.requestedTime != null && scheduleReady) {
+      return clampRequestedTime(initialDraft.requestedTime, serverNow(), maxCooking, weeklySchedule);
     }
-    return minTime;
+    return earliestSlot;
   });
 
   useEffect(() => {
@@ -689,41 +686,48 @@ function CartScreen({
   }, [cart, requestedTime, comment]);
 
   useEffect(() => {
+    if (!scheduleReady) return;
     const sync = () => {
       void api.config().then((config) => {
         const now = config.server_time;
-        const nextMin = minimumRequestedTime(now, maxCooking);
-        if (!userPickedTime.current || requestedTime < nextMin) {
-          setRequestedTime(nextMin);
+        const next = findEarliestValidSlot(now, maxCooking, config.weekly_schedule ?? weeklySchedule);
+        if (!userPickedTime.current) {
+          setRequestedTime(next);
+          return;
         }
+        setRequestedTime((current) => clampRequestedTime(current, now, maxCooking, config.weekly_schedule ?? weeklySchedule));
       });
     };
     sync();
     const timer = window.setInterval(sync, 8000);
     return () => window.clearInterval(timer);
-  }, [maxCooking, requestedTime]);
+  }, [maxCooking, scheduleReady, weeklySchedule]);
 
   const selected = toMoscowParts(requestedTime);
-  const dates = allowedDates(minTime, maxTime);
+  const selectedBounds = scheduleReady
+    ? pickupBoundsForDate(selected, serverNow(), maxCooking, weeklySchedule)
+    : { minMs: requestedTime, maxMs: requestedTime, canAcceptOrderToday: true };
+  const dates = scheduleReady ? allowedDates(serverNow(), maxCooking, weeklySchedule) : [];
   const years = [...new Set(dates.map((date) => date.year))];
   const months = dates.filter((date) => date.year === selected.year).map((date) => date.month);
   const days = dates
     .filter((date) => date.year === selected.year && date.month === selected.month)
     .map((date) => date.day);
-  const hourRange = allowedHourRange(selected, minTime, maxTime);
-  const minuteRange = allowedMinuteRange(selected, selected.hour, minTime, maxTime);
+  const hourRange = allowedHourRange(selected, selectedBounds.minMs, selectedBounds.maxMs);
+  const minuteRange = allowedMinuteRange(selected, selected.hour, selectedBounds.minMs, selectedBounds.maxMs);
   const isTimeValid =
-    requestedTime >= minTime &&
-    requestedTime <= maxTime &&
-    selected.hour * 60 + selected.minute <= parseTimeToMinutes(cutoff) &&
-    selected.hour * 60 + selected.minute >= parseTimeToMinutes(workStart);
+    scheduleReady &&
+    requestedTime >= selectedBounds.minMs &&
+    requestedTime <= selectedBounds.maxMs &&
+    canSubmitOrderForSelectedDate(selected, serverNow(), weeklySchedule);
   const hasDifferentCookingTimes = new Set(cart.map((item) => item.cookingTime)).size > 1;
-  const cafeOpen = isOpen && isCafeOpen(serverNow(), workStart, cutoff);
+  const selectedDaySchedule = scheduleReady ? scheduleForDate(selected, weeklySchedule) : null;
 
   const setDate = (year: number, month: number, day: number) => {
     userPickedTime.current = true;
     const current = toMoscowParts(requestedTime);
-    setRequestedTime(moscowToMs(year, month, day, current.hour, current.minute));
+    const next = moscowToMs(year, month, day, current.hour, current.minute);
+    setRequestedTime(clampRequestedTime(next, serverNow(), maxCooking, weeklySchedule));
   };
 
   const setHour = (hour: number) => {
@@ -732,8 +736,8 @@ function CartScreen({
     const minutes = allowedMinuteRange(
       { year: current.year, month: current.month, day: current.day },
       hour,
-      minTime,
-      maxTime,
+      selectedBounds.minMs,
+      selectedBounds.maxMs,
     );
     const minute = minutes.includes(current.minute) ? current.minute : minutes[0];
     setRequestedTime(moscowToMs(current.year, current.month, current.day, hour, minute));
@@ -746,7 +750,7 @@ function CartScreen({
   };
 
   const submit = async () => {
-    if (!cafeOpen) return;
+    if (!isTimeValid) return;
     setSubmitting(true);
     setError(null);
     try {
@@ -770,14 +774,6 @@ function CartScreen({
       setSubmitting(false);
     }
   };
-
-  if (!cafeOpen) {
-    return (
-      <ScreenLayout topHeight={topHeight} left="home" right="profile" onLeft={onHome} onRight={onProfile}>
-        <div className="closed-banner">Кафе закрыто, заказы с {workStart}</div>
-      </ScreenLayout>
-    );
-  }
 
   if (cart.length === 0) {
     return (
@@ -880,11 +876,13 @@ function CartScreen({
           />
         </div>
         <p className="text-muted" style={{ width: contentWidth, textAlign: "center" }}>
-          Минимум: {formatDateTime(minTime)}
+          Минимум: {formatDateTime(selectedBounds.minMs)} · максимум: {formatDateTime(selectedBounds.maxMs)}
         </p>
         {!isTimeValid && (
           <p className="text-error" style={{ width: contentWidth, textAlign: "center" }}>
-            Выберите время не раньше минимального и не позже {cutoff} в пределах трёх дней.
+            {selectedDaySchedule
+              ? `Выберите время от ${selectedDaySchedule.open_time} + ${maxCooking} мин до ${selectedDaySchedule.last_order_time} + ${maxCooking} мин. На сегодня заказ принимаем до ${selectedDaySchedule.last_order_time}.`
+              : "Загружаем расписание..."}
           </p>
         )}
         {hasDifferentCookingTimes && (

@@ -1,4 +1,15 @@
+import type { DayScheduleDto } from "./types";
+
 const MOSCOW = "Europe/Moscow";
+const WEEKDAY_TO_ISO: Record<string, number> = {
+  Mon: 1,
+  Tue: 2,
+  Wed: 3,
+  Thu: 4,
+  Fri: 5,
+  Sat: 6,
+  Sun: 7,
+};
 
 export function toMoscowParts(ms: number) {
   const parts = new Intl.DateTimeFormat("ru-RU", {
@@ -38,30 +49,9 @@ export function moscowToMs(year: number, month: number, day: number, hour: numbe
   return utc - diffMinutes * 60_000;
 }
 
-export function minimumRequestedTime(serverNowMs: number, maxCookingMinutes: number): number {
-  const now = toMoscowParts(serverNowMs);
-  const rawMinutes = now.hour * 60 + now.minute + maxCookingMinutes;
-  const rounded = Math.ceil(rawMinutes / 10) * 10;
-  const hour = Math.floor(rounded / 60) % 24;
-  const minute = rounded % 60;
-  return moscowToMs(now.year, now.month, now.day, hour, minute);
-}
-
-export function maximumRequestedTime(serverNowMs: number): number {
-  const now = toMoscowParts(serverNowMs);
-  const maxDay = new Date(Date.UTC(now.year, now.month - 1, now.day + 3));
-  return moscowToMs(maxDay.getUTCFullYear(), maxDay.getUTCMonth() + 1, maxDay.getUTCDate(), 23, 50);
-}
-
 export function parseTimeToMinutes(value: string): number {
   const [h, m] = value.split(":").map(Number);
   return h * 60 + m;
-}
-
-export function isCafeOpen(nowMs: number, workStart: string, cutoff: string): boolean {
-  const now = toMoscowParts(nowMs);
-  const current = now.hour * 60 + now.minute;
-  return current >= parseTimeToMinutes(workStart) && current <= parseTimeToMinutes(cutoff);
 }
 
 export function formatMoney(value: number): string {
@@ -82,19 +72,93 @@ export function normalizeMenuName(value: string): string {
   return value.trim().replace(/\s+/g, " ").toUpperCase();
 }
 
-export function allowedDates(minMs: number, maxMs: number): { year: number; month: number; day: number }[] {
+export function moscowIsoDayOfWeek(year: number, month: number, day: number): number {
+  const label = new Intl.DateTimeFormat("en-US", { timeZone: MOSCOW, weekday: "short" }).format(
+    new Date(moscowToMs(year, month, day, 12, 0)),
+  );
+  return WEEKDAY_TO_ISO[label] ?? 1;
+}
+
+export function scheduleForDate(
+  date: { year: number; month: number; day: number },
+  weeklySchedule: DayScheduleDto[],
+): DayScheduleDto {
+  const dayOfWeek = moscowIsoDayOfWeek(date.year, date.month, date.day);
+  const schedule = weeklySchedule.find((entry) => entry.day_of_week === dayOfWeek);
+  if (!schedule) {
+    throw new Error("Расписание для выбранного дня не найдено");
+  }
+  return schedule;
+}
+
+export function addMoscowDays(year: number, month: number, day: number, delta: number) {
+  const next = toMoscowParts(moscowToMs(year, month, day, 12, 0) + delta * 86_400_000);
+  return { year: next.year, month: next.month, day: next.day };
+}
+
+export function isSameMoscowDate(
+  left: { year: number; month: number; day: number },
+  right: { year: number; month: number; day: number },
+): boolean {
+  return left.year === right.year && left.month === right.month && left.day === right.day;
+}
+
+export function pickupBoundsForDate(
+  date: { year: number; month: number; day: number },
+  serverNowMs: number,
+  prepMinutes: number,
+  weeklySchedule: DayScheduleDto[],
+): { minMs: number; maxMs: number; canAcceptOrderToday: boolean } {
+  const schedule = scheduleForDate(date, weeklySchedule);
+  const openMinutes = parseTimeToMinutes(schedule.open_time) + prepMinutes;
+  const maxMinutes = parseTimeToMinutes(schedule.last_order_time) + prepMinutes;
+  const today = toMoscowParts(serverNowMs);
+  const isToday = isSameMoscowDate(date, today);
+  const nowMinutes = today.hour * 60 + today.minute;
+
+  let minMinutes = openMinutes;
+  if (isToday) {
+    minMinutes = Math.max(openMinutes, nowMinutes + prepMinutes);
+  }
+
+  const minMs = moscowToMs(date.year, date.month, date.day, Math.floor(minMinutes / 60), minMinutes % 60);
+  const maxMs = moscowToMs(date.year, date.month, date.day, Math.floor(maxMinutes / 60), maxMinutes % 60);
+  const canAcceptOrderToday = !isToday || nowMinutes <= parseTimeToMinutes(schedule.last_order_time);
+
+  return { minMs, maxMs, canAcceptOrderToday };
+}
+
+export function findEarliestValidSlot(serverNowMs: number, prepMinutes: number, weeklySchedule: DayScheduleDto[]): number {
+  const today = toMoscowParts(serverNowMs);
+  for (let offset = 0; offset <= 3; offset += 1) {
+    const date = addMoscowDays(today.year, today.month, today.day, offset);
+    const bounds = pickupBoundsForDate(date, serverNowMs, prepMinutes, weeklySchedule);
+    if (offset === 0 && !bounds.canAcceptOrderToday) {
+      continue;
+    }
+    if (bounds.minMs <= bounds.maxMs) {
+      return bounds.minMs;
+    }
+  }
+  return moscowToMs(today.year, today.month, today.day, 23, 59);
+}
+
+export function allowedDates(
+  serverNowMs: number,
+  prepMinutes: number,
+  weeklySchedule: DayScheduleDto[],
+): { year: number; month: number; day: number }[] {
+  const today = toMoscowParts(serverNowMs);
   const dates: { year: number; month: number; day: number }[] = [];
-  const min = toMoscowParts(minMs);
-  const max = toMoscowParts(maxMs);
-  const cursor = new Date(Date.UTC(min.year, min.month - 1, min.day));
-  const end = new Date(Date.UTC(max.year, max.month - 1, max.day));
-  while (cursor <= end) {
-    dates.push({
-      year: cursor.getUTCFullYear(),
-      month: cursor.getUTCMonth() + 1,
-      day: cursor.getUTCDate(),
-    });
-    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  for (let offset = 0; offset <= 3; offset += 1) {
+    const date = addMoscowDays(today.year, today.month, today.day, offset);
+    const bounds = pickupBoundsForDate(date, serverNowMs, prepMinutes, weeklySchedule);
+    if (offset === 0 && !bounds.canAcceptOrderToday) {
+      continue;
+    }
+    if (bounds.minMs <= bounds.maxMs) {
+      dates.push(date);
+    }
   }
   return dates;
 }
@@ -108,7 +172,7 @@ export function allowedHourRange(
   const max = toMoscowParts(maxMs);
   const minHour = date.year === min.year && date.month === min.month && date.day === min.day ? min.hour : 0;
   const maxHour = date.year === max.year && date.month === max.month && date.day === max.day ? max.hour : 23;
-  return Array.from({ length: maxHour - minHour + 1 }, (_, i) => minHour + i);
+  return Array.from({ length: maxHour - minHour + 1 }, (_, index) => minHour + index);
 }
 
 export function allowedMinuteRange(
@@ -123,5 +187,43 @@ export function allowedMinuteRange(
     date.year === min.year && date.month === min.month && date.day === min.day && hour === min.hour ? min.minute : 0;
   const maxMinute =
     date.year === max.year && date.month === max.month && date.day === max.day && hour === max.hour ? max.minute : 59;
-  return Array.from({ length: maxMinute - minMinute + 1 }, (_, i) => minMinute + i);
+  return Array.from({ length: maxMinute - minMinute + 1 }, (_, index) => minMinute + index);
+}
+
+export function canSubmitOrderForSelectedDate(
+  date: { year: number; month: number; day: number },
+  serverNowMs: number,
+  weeklySchedule: DayScheduleDto[],
+): boolean {
+  const today = toMoscowParts(serverNowMs);
+  if (!isSameMoscowDate(date, today)) {
+    return true;
+  }
+  const schedule = scheduleForDate(date, weeklySchedule);
+  const nowMinutes = today.hour * 60 + today.minute;
+  return nowMinutes <= parseTimeToMinutes(schedule.last_order_time);
+}
+
+export function clampRequestedTime(
+  requestedMs: number,
+  serverNowMs: number,
+  prepMinutes: number,
+  weeklySchedule: DayScheduleDto[],
+): number {
+  const selected = toMoscowParts(requestedMs);
+  const bounds = pickupBoundsForDate(selected, serverNowMs, prepMinutes, weeklySchedule);
+  if (requestedMs < bounds.minMs) {
+    return bounds.minMs;
+  }
+  if (requestedMs > bounds.maxMs) {
+    return bounds.maxMs;
+  }
+  return requestedMs;
+}
+
+/** @deprecated kept for callers migrating off single-day settings */
+export function isCafeOpen(nowMs: number, workStart: string, cutoff: string): boolean {
+  const now = toMoscowParts(nowMs);
+  const current = now.hour * 60 + now.minute;
+  return current >= parseTimeToMinutes(workStart) && current <= parseTimeToMinutes(cutoff);
 }

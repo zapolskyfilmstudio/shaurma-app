@@ -37,7 +37,7 @@ import io.ktor.server.routing.routing
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonNamingStrategy
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
@@ -239,12 +239,18 @@ class ApiException(
     val serverTime: Long,
 )
 @Serializable data class MenuResponse(val serverTime: Long, val categories: List<CategoryDto>)
+@Serializable data class DayScheduleDto(
+    val dayOfWeek: Int,
+    val openTime: String,
+    val lastOrderTime: String,
+)
 @Serializable data class PublicConfigResponse(
     val serverTime: Long,
     val workStartTime: String,
     val cutoffTime: String,
     val isOpen: Boolean,
     val paymentEnabled: Boolean,
+    val weeklySchedule: List<DayScheduleDto> = emptyList(),
 )
 @Serializable data class CategoryDto(
     val id: Long,
@@ -360,7 +366,10 @@ class ApiException(
 @Serializable data class StatsBucket(val totalSum: Long, val orderCount: Long)
 @Serializable data class StatisticsResponse(val today: StatsBucket, val period: StatsBucket)
 @Serializable data class SettingDto(val key: String, val value: String, val updatedAt: Long)
-@Serializable data class SettingsResponse(val settings: List<SettingDto>)
+@Serializable data class SettingsResponse(
+    val settings: List<SettingDto>,
+    val weeklySchedule: List<DayScheduleDto> = emptyList(),
+)
 
 @Serializable data class CategoryUpsert(
     val name: String,
@@ -442,6 +451,7 @@ private data class CreatedOrder(
 )
 
 private data class Settings(val workStart: LocalTime, val cutoffRegular: LocalTime, val cutoffGrill: LocalTime)
+private data class DaySchedule(val openTime: LocalTime, val lastOrderTime: LocalTime)
 private data class BuiltOrderItem(
     val menuItemId: Long,
     val name: String,
@@ -506,14 +516,17 @@ private fun Route.publicRoutes(config: AppConfig, database: AppDatabase, tbankCl
     get("/config") {
         val response = database.read { connection ->
             val now = serverNow(connection)
-            val settings = readSettings(connection)
+            val schedule = readWeeklySchedule(connection)
+            val scheduleDtos = schedule.toDtoList()
+            val todaySchedule = schedule.forDate(Instant.ofEpochMilli(now).atZone(MoscowZone).toLocalDate())
             val nowTime = Instant.ofEpochMilli(now).atZone(MoscowZone).toLocalTime()
             PublicConfigResponse(
                 serverTime = now,
-                workStartTime = settings.workStart.toString(),
-                cutoffTime = settings.cutoffRegular.toString(),
-                isOpen = !nowTime.isBefore(settings.workStart) && !nowTime.isAfter(settings.cutoffRegular),
+                workStartTime = todaySchedule.openTime.toString(),
+                cutoffTime = todaySchedule.lastOrderTime.toString(),
+                isOpen = !nowTime.isBefore(todaySchedule.openTime) && !nowTime.isAfter(todaySchedule.lastOrderTime),
                 paymentEnabled = tbankClient.config.enabled,
+                weeklySchedule = scheduleDtos,
             )
         }
         call.respond(response)
@@ -842,13 +855,27 @@ private fun Route.adminRoutes(database: AppDatabase) {
 
     route("/admin/settings") {
         get {
-            val settings = database.read { connection -> readSettingsDtos(connection) }
-            call.respond(SettingsResponse(settings))
+            val response = database.read { connection ->
+                SettingsResponse(
+                    settings = readSettingsDtos(connection),
+                    weeklySchedule = readWeeklySchedule(connection).toDtoList(),
+                )
+            }
+            call.respond(response)
         }
         put {
             val body = call.receive<JsonObject>()
-            val updated = database.transaction { connection, now -> updateSettings(connection, body, now) }
-            call.respond(SettingsResponse(updated))
+            val response = database.transaction { connection, now ->
+                val settings = updateSettings(connection, body, now)
+                if ("weekly_schedule" in body) {
+                    updateWeeklySchedule(connection, parseWeeklySchedule(body["weekly_schedule"]), now)
+                }
+                SettingsResponse(
+                    settings = settings,
+                    weeklySchedule = readWeeklySchedule(connection).toDtoList(),
+                )
+            }
+            call.respond(response)
         }
     }
 }
@@ -928,9 +955,9 @@ private fun createOrderDraft(
 
     val builtItems = request.items.map { buildOrderItem(connection, it) }
     val maxCookingMinutes = builtItems.maxOf { it.cookingTime }
-    val settings = readSettings(connection)
-    validateRequestedTime(request.requestedTime, now, settings, builtItems.any { it.isGrill })
-    val cookingStartTime = calculateCookingStart(request.requestedTime, now, settings.workStart, maxCookingMinutes)
+    val schedule = readWeeklySchedule(connection)
+    validateRequestedTime(request.requestedTime, now, schedule, maxCookingMinutes)
+    val cookingStartTime = calculateCookingStart(request.requestedTime, now, schedule, maxCookingMinutes)
     if (request.requestedTime < cookingStartTime + maxCookingMinutes * 60_000L) {
         throw ApiException(HttpStatusCode.BadRequest, "INVALID_REQUESTED_TIME", "Requested time is too early for cooking time")
     }
@@ -1200,28 +1227,57 @@ private fun buildOrderItem(connection: Connection, request: CreateOrderItemReque
     )
 }
 
-private fun validateRequestedTime(requestedTime: Long, now: Long, settings: Settings, @Suppress("UNUSED_PARAMETER") hasGrill: Boolean) {
+private fun validateRequestedTime(
+    requestedTime: Long,
+    now: Long,
+    schedule: Map<Int, DaySchedule>,
+    maxCookingMinutes: Int,
+) {
     val requested = Instant.ofEpochMilli(requestedTime).atZone(MoscowZone)
-    val today = Instant.ofEpochMilli(now).atZone(MoscowZone).toLocalDate()
+    val nowZoned = Instant.ofEpochMilli(now).atZone(MoscowZone)
+    val today = nowZoned.toLocalDate()
     val requestedDate = requested.toLocalDate()
     if (requestedDate.isBefore(today) || requestedDate.isAfter(today.plusDays(3))) {
         throw ApiException(HttpStatusCode.BadRequest, "INVALID_REQUESTED_TIME", "Requested date must be from today to today+3")
     }
+    val daySchedule = schedule.forDate(requestedDate)
+    if (requestedDate == today) {
+        val nowTime = nowZoned.toLocalTime()
+        if (nowTime.isAfter(daySchedule.lastOrderTime)) {
+            throw ApiException(HttpStatusCode.BadRequest, "ORDER_ACCEPTANCE_CLOSED", "Today's order acceptance is closed")
+        }
+    }
     val requestedLocalTime = requested.toLocalTime()
-    if (requestedLocalTime.isBefore(settings.workStart) || requestedLocalTime.isAfter(settings.cutoffRegular)) {
-        throw ApiException(HttpStatusCode.BadRequest, "INVALID_REQUESTED_TIME", "Requested time must be between work_start_time and cutoff")
+    val minTime = daySchedule.openTime.plusMinutes(maxCookingMinutes.toLong())
+    val maxTime = daySchedule.lastOrderTime.plusMinutes(maxCookingMinutes.toLong())
+    val effectiveMin = if (requestedDate == today) {
+        val nowPlusPrep = nowZoned.toLocalTime().plusMinutes(maxCookingMinutes.toLong())
+        if (nowPlusPrep.isAfter(minTime)) nowPlusPrep else minTime
+    } else {
+        minTime
+    }
+    if (requestedLocalTime.isBefore(effectiveMin) || requestedLocalTime.isAfter(maxTime)) {
+        throw ApiException(
+            HttpStatusCode.BadRequest,
+            "INVALID_REQUESTED_TIME",
+            "Requested time must be between ${effectiveMin} and ${maxTime}",
+        )
     }
 }
 
-private fun calculateCookingStart(requestedTime: Long, now: Long, workStart: LocalTime, maxCookingMinutes: Int): Long {
-    var cookingStart = max(now, requestedTime - maxCookingMinutes * 60_000L)
-    val requestedDate = Instant.ofEpochMilli(requestedTime).atZone(MoscowZone).toLocalDate()
-    val cookingZoned = Instant.ofEpochMilli(cookingStart).atZone(MoscowZone)
-    if (cookingZoned.toLocalDate().isBefore(requestedDate) ||
-        (cookingZoned.toLocalDate() == requestedDate && cookingZoned.toLocalTime().isBefore(workStart))
-    ) {
-        cookingStart = requestedDate.atTime(workStart).atZone(MoscowZone).toInstant().toEpochMilli()
-    }
+private fun calculateCookingStart(
+    requestedTime: Long,
+    now: Long,
+    schedule: Map<Int, DaySchedule>,
+    maxCookingMinutes: Int,
+): Long {
+    val requested = Instant.ofEpochMilli(requestedTime).atZone(MoscowZone)
+    val requestedDate = requested.toLocalDate()
+    val daySchedule = schedule.forDate(requestedDate)
+    val openInstant = requestedDate.atTime(daySchedule.openTime).atZone(MoscowZone).toInstant().toEpochMilli()
+    var cookingStart = requestedTime - maxCookingMinutes * 60_000L
+    cookingStart = max(cookingStart, now)
+    cookingStart = max(cookingStart, openInstant)
     return cookingStart
 }
 
@@ -1653,6 +1709,80 @@ private fun readStats(connection: Connection, from: LocalDate, to: LocalDate): S
     }
 }
 
+private fun readWeeklySchedule(connection: Connection): Map<Int, DaySchedule> =
+    connection.prepareStatement(
+        "SELECT day_of_week, open_time, last_order_time FROM weekly_schedule ORDER BY day_of_week"
+    ).use { statement ->
+        statement.executeQuery().use { result ->
+            buildMap {
+                while (result.next()) {
+                    put(
+                        result.getInt("day_of_week"),
+                        DaySchedule(
+                            openTime = LocalTime.parse(result.getString("open_time").take(5)),
+                            lastOrderTime = LocalTime.parse(result.getString("last_order_time").take(5)),
+                        ),
+                    )
+                }
+            }
+        }
+    }
+
+private fun Map<Int, DaySchedule>.forDate(date: java.time.LocalDate): DaySchedule =
+    this[date.dayOfWeek.value]
+        ?: throw ApiException(HttpStatusCode.InternalServerError, "SCHEDULE_NOT_FOUND", "Weekly schedule is not configured")
+
+private fun Map<Int, DaySchedule>.toDtoList(): List<DayScheduleDto> =
+    entries.sortedBy { it.key }.map { (day, schedule) ->
+        DayScheduleDto(
+            dayOfWeek = day,
+            openTime = schedule.openTime.toString(),
+            lastOrderTime = schedule.lastOrderTime.toString(),
+        )
+    }
+
+private fun parseWeeklySchedule(element: JsonElement?): List<DayScheduleDto> {
+    val array = element as? JsonArray
+        ?: throw ApiException(HttpStatusCode.BadRequest, "BAD_REQUEST", "weekly_schedule must be an array")
+    return array.map { item ->
+        val objectBody = item as? JsonObject
+            ?: throw ApiException(HttpStatusCode.BadRequest, "BAD_REQUEST", "weekly_schedule entries must be objects")
+        val dayOfWeek = objectBody["day_of_week"]?.jsonPrimitive?.content?.toIntOrNull()
+            ?: throw ApiException(HttpStatusCode.BadRequest, "BAD_REQUEST", "day_of_week must be an integer")
+        if (dayOfWeek !in 1..7) {
+            throw ApiException(HttpStatusCode.BadRequest, "BAD_REQUEST", "day_of_week must be between 1 and 7")
+        }
+        val openTime = objectBody["open_time"]?.jsonPrimitive?.content
+            ?: throw ApiException(HttpStatusCode.BadRequest, "BAD_REQUEST", "open_time is required")
+        val lastOrderTime = objectBody["last_order_time"]?.jsonPrimitive?.content
+            ?: throw ApiException(HttpStatusCode.BadRequest, "BAD_REQUEST", "last_order_time is required")
+        LocalTime.parse(openTime)
+        LocalTime.parse(lastOrderTime)
+        DayScheduleDto(dayOfWeek = dayOfWeek, openTime = openTime, lastOrderTime = lastOrderTime)
+    }
+}
+
+private fun updateWeeklySchedule(connection: Connection, schedule: List<DayScheduleDto>, now: Long) {
+    if (schedule.size != 7 || schedule.map { it.dayOfWeek }.toSet().size != 7) {
+        throw ApiException(HttpStatusCode.BadRequest, "BAD_REQUEST", "weekly_schedule must contain 7 unique days")
+    }
+    connection.prepareStatement(
+        """
+        UPDATE weekly_schedule
+        SET open_time = ?, last_order_time = ?, updated_at = ?
+        WHERE day_of_week = ?
+        """.trimIndent()
+    ).use { statement ->
+        schedule.forEach { day ->
+            statement.setTime(1, java.sql.Time.valueOf(day.openTime))
+            statement.setTime(2, java.sql.Time.valueOf(day.lastOrderTime))
+            statement.setLong(3, now)
+            statement.setInt(4, day.dayOfWeek)
+            statement.executeUpdate()
+        }
+    }
+}
+
 private fun readSettings(connection: Connection): Settings {
     val values = connection.prepareStatement("SELECT key, value FROM settings").use { statement ->
         statement.executeQuery().use { result ->
@@ -1680,6 +1810,7 @@ private fun readSettingsDtos(connection: Connection): List<SettingDto> =
 private fun updateSettings(connection: Connection, body: JsonObject, now: Long): List<SettingDto> {
     if (body.isEmpty()) throw ApiException(HttpStatusCode.BadRequest, "BAD_REQUEST", "Settings body must not be empty")
     body.forEach { (key, value) ->
+        if (key == "weekly_schedule") return@forEach
         val stringValue = parseNullableString(value, key)
             ?: throw ApiException(HttpStatusCode.BadRequest, "BAD_REQUEST", "Setting value must be a string")
         if (key in setOf("work_start_time", "cutoff_regular", "cutoff_grill")) LocalTime.parse(stringValue)

@@ -138,6 +138,13 @@ export type SettingDto = {
   updated_at: number;
 };
 
+export type DayScheduleDto = {
+  day_of_week: number;
+  open_time: string;
+  last_order_time: string;
+};
+
 export type SettingsResponse = {
   settings: SettingDto[];
+  weekly_schedule: DayScheduleDto[];
 };
