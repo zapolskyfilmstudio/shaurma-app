@@ -254,37 +254,70 @@ button.card {
   display: flex;
   justify-content: center;
   align-items: center;
-  gap: 8px;
+  gap: 4px;
   width: 100%;
 }
 
 .wheel {
-  border: 2px solid #fff;
-  border-radius: 12px;
-  overflow: hidden;
   position: relative;
   flex-shrink: 0;
+  overflow: hidden;
+  touch-action: pan-y;
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 0%,
+    #000 18%,
+    #000 82%,
+    transparent 100%
+  );
+  mask-image: linear-gradient(to bottom, transparent 0%, #000 18%, #000 82%, transparent 100%);
 }
 
-.wheel-frame {
+.wheel--empty {
+  opacity: 0.35;
+}
+
+.wheel-fade {
   position: absolute;
-  left: 6%;
-  right: 6%;
-  top: 33.33%;
-  height: 33.33%;
-  border-top: 2px solid #fff;
-  border-bottom: 2px solid #fff;
+  left: 0;
+  right: 0;
+  height: 38%;
   pointer-events: none;
+  z-index: 3;
+}
+
+.wheel-fade-top {
+  top: 0;
+  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.96) 0%, rgba(0, 0, 0, 0.72) 45%, transparent 100%);
+}
+
+.wheel-fade-bottom {
+  bottom: 0;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.96) 0%, rgba(0, 0, 0, 0.72) 45%, transparent 100%);
+}
+
+.wheel-selection {
+  position: absolute;
+  left: 8%;
+  right: 8%;
   z-index: 2;
+  pointer-events: none;
+  border-top: 1px solid rgba(255, 255, 255, 0.38);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.38);
+  box-sizing: border-box;
 }
 
 .wheel-list {
   height: 100%;
   overflow-y: auto;
-  scroll-snap-type: y mandatory;
+  overscroll-behavior: contain;
+  scroll-snap-type: y proximity;
+  scroll-padding-top: calc((100% - var(--wheel-item-height, 48px)) / 2);
+  scroll-padding-bottom: calc((100% - var(--wheel-item-height, 48px)) / 2);
   scrollbar-width: none;
   position: relative;
   z-index: 1;
+  -webkit-overflow-scrolling: touch;
 }
 
 .wheel-list::-webkit-scrollbar {
@@ -296,17 +329,21 @@ button.card {
   place-items: center;
   scroll-snap-align: center;
   color: #fff;
-  opacity: 0.35;
-  font-size: 22.5px;
+  font-size: 22px;
+  font-weight: 400;
   line-height: 1;
-  transition: opacity 0.1s ease, font-size 0.1s ease;
   user-select: none;
+  will-change: transform, opacity;
+  transform-origin: center center;
 }
 
-.wheel-item.active {
-  color: #fff;
-  opacity: 1;
-  font-size: 45px;
+.wheel-separator {
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 34px;
+  font-weight: 300;
+  line-height: 1;
+  padding: 0 2px;
+  align-self: center;
 }
 
 .spinner {
@@ -322,12 +359,6 @@ button.card {
   to {
     transform: rotate(360deg);
   }
-}
-
-.wheel-separator {
-  font-size: 42px;
-  line-height: 1;
-  padding: 0 2px;
 }
 
 .closed-banner {

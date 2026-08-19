@@ -2,6 +2,7 @@ import { StrictMode, useCallback, useEffect, useMemo, useRef, useState } from "r
 import { createRoot } from "react-dom/client";
 import { api } from "./api";
 import { MenuButton, ScreenLayout, WheelPicker } from "./components";
+import { wheelMetrics } from "./wheelPicker";
 import {
   clearCartDraft,
   clearPendingOrderId,
@@ -621,7 +622,7 @@ function CartScreen({
   const contentWidth = viewport.width * 0.9;
   const buttonWidth = viewport.width * 0.8;
   const buttonHeight = viewport.height * 0.85 * 0.075;
-  const wheelHeight = viewport.height * 0.85 * 0.11;
+  const wheels = wheelMetrics(viewport.width);
   const [comment, setComment] = useState(initialDraft.comment);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -786,17 +787,21 @@ function CartScreen({
             key={`hour-${hourRange.join(",")}`}
             values={hourRange.map((hour) => String(hour).padStart(2, "0"))}
             selectedIndex={Math.max(0, hourRange.indexOf(selected.hour))}
-            width={contentWidth * 0.28}
-            height={wheelHeight}
+            width={wheels.hourWidth}
+            height={wheels.height}
+            itemHeight={wheels.itemHeight}
             onChange={(index) => setHour(hourRange[index])}
           />
-          <span className="wheel-separator">:</span>
+          <span className="wheel-separator" style={{ fontSize: wheels.separatorSize }}>
+            :
+          </span>
           <WheelPicker
             key={`minute-${selected.hour}-${minuteRange.join(",")}`}
             values={minuteRange.map((minute) => String(minute).padStart(2, "0"))}
             selectedIndex={Math.max(0, minuteRange.indexOf(selected.minute))}
-            width={contentWidth * 0.28}
-            height={wheelHeight}
+            width={wheels.minuteWidth}
+            height={wheels.height}
+            itemHeight={wheels.itemHeight}
             onChange={(index) => setMinute(minuteRange[index])}
           />
         </div>
@@ -804,22 +809,25 @@ function CartScreen({
           <WheelPicker
             values={days.map((day) => String(day).padStart(2, "0"))}
             selectedIndex={Math.max(0, days.indexOf(selected.day))}
-            width={contentWidth * 0.25}
-            height={wheelHeight}
+            width={wheels.dayWidth}
+            height={wheels.height}
+            itemHeight={wheels.itemHeight}
             onChange={(index) => setDate(selected.year, selected.month, days[index])}
           />
           <WheelPicker
             values={months.map((month) => monthNameRu(month))}
             selectedIndex={Math.max(0, months.indexOf(selected.month))}
-            width={contentWidth * 0.35}
-            height={wheelHeight}
+            width={wheels.monthWidth}
+            height={wheels.height}
+            itemHeight={wheels.itemHeight}
             onChange={(index) => setDate(selected.year, months[index], selected.day)}
           />
           <WheelPicker
             values={years.map(String)}
             selectedIndex={Math.max(0, years.indexOf(selected.year))}
-            width={contentWidth * 0.25}
-            height={wheelHeight}
+            width={wheels.yearWidth}
+            height={wheels.height}
+            itemHeight={wheels.itemHeight}
             onChange={(index) => setDate(years[index], selected.month, selected.day)}
           />
         </div>
