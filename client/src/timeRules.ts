@@ -103,29 +103,65 @@ export function isSameMoscowDate(
   return left.year === right.year && left.month === right.month && left.day === right.day;
 }
 
+function minutesOnDateToMs(date: { year: number; month: number; day: number }, minutesFromMidnight: number): number {
+  let year = date.year;
+  let month = date.month;
+  let day = date.day;
+  let minutes = minutesFromMidnight;
+
+  while (minutes >= 1440) {
+    minutes -= 1440;
+    ({ year, month, day } = addMoscowDays(year, month, day, 1));
+  }
+  while (minutes < 0) {
+    minutes += 1440;
+    ({ year, month, day } = addMoscowDays(year, month, day, -1));
+  }
+
+  return moscowToMs(year, month, day, Math.floor(minutes / 60), minutes % 60);
+}
+
+export type PickupBounds = {
+  minMs: number;
+  maxMs: number;
+  canAcceptOrderToday: boolean;
+  isValid: boolean;
+};
+
 export function pickupBoundsForDate(
   date: { year: number; month: number; day: number },
   serverNowMs: number,
   prepMinutes: number,
   weeklySchedule: DayScheduleDto[],
-): { minMs: number; maxMs: number; canAcceptOrderToday: boolean } {
+): PickupBounds {
   const schedule = scheduleForDate(date, weeklySchedule);
   const openMinutes = parseTimeToMinutes(schedule.open_time) + prepMinutes;
   const maxMinutes = parseTimeToMinutes(schedule.last_order_time) + prepMinutes;
   const today = toMoscowParts(serverNowMs);
   const isToday = isSameMoscowDate(date, today);
   const nowMinutes = today.hour * 60 + today.minute;
+  const lastOrderMinutes = parseTimeToMinutes(schedule.last_order_time);
+  const canAcceptOrderToday = !isToday || nowMinutes <= lastOrderMinutes;
+
+  if (isToday && !canAcceptOrderToday) {
+    return { minMs: 0, maxMs: 0, canAcceptOrderToday: false, isValid: false };
+  }
 
   let minMinutes = openMinutes;
   if (isToday) {
     minMinutes = Math.max(openMinutes, nowMinutes + prepMinutes);
   }
 
-  const minMs = moscowToMs(date.year, date.month, date.day, Math.floor(minMinutes / 60), minMinutes % 60);
-  const maxMs = moscowToMs(date.year, date.month, date.day, Math.floor(maxMinutes / 60), maxMinutes % 60);
-  const canAcceptOrderToday = !isToday || nowMinutes <= parseTimeToMinutes(schedule.last_order_time);
+  if (minMinutes > maxMinutes || minMinutes >= 1440) {
+    return { minMs: 0, maxMs: 0, canAcceptOrderToday, isValid: false };
+  }
 
-  return { minMs, maxMs, canAcceptOrderToday };
+  return {
+    minMs: minutesOnDateToMs(date, minMinutes),
+    maxMs: minutesOnDateToMs(date, maxMinutes),
+    canAcceptOrderToday,
+    isValid: true,
+  };
 }
 
 export function findEarliestValidSlot(serverNowMs: number, prepMinutes: number, weeklySchedule: DayScheduleDto[]): number {
@@ -133,14 +169,12 @@ export function findEarliestValidSlot(serverNowMs: number, prepMinutes: number, 
   for (let offset = 0; offset <= 3; offset += 1) {
     const date = addMoscowDays(today.year, today.month, today.day, offset);
     const bounds = pickupBoundsForDate(date, serverNowMs, prepMinutes, weeklySchedule);
-    if (offset === 0 && !bounds.canAcceptOrderToday) {
-      continue;
-    }
-    if (bounds.minMs <= bounds.maxMs) {
+    if (bounds.isValid) {
       return bounds.minMs;
     }
   }
-  return moscowToMs(today.year, today.month, today.day, 23, 59);
+  const fallbackDate = addMoscowDays(today.year, today.month, today.day, 1);
+  return minutesOnDateToMs(fallbackDate, parseTimeToMinutes("12:00") + prepMinutes);
 }
 
 export function allowedDates(
@@ -153,14 +187,20 @@ export function allowedDates(
   for (let offset = 0; offset <= 3; offset += 1) {
     const date = addMoscowDays(today.year, today.month, today.day, offset);
     const bounds = pickupBoundsForDate(date, serverNowMs, prepMinutes, weeklySchedule);
-    if (offset === 0 && !bounds.canAcceptOrderToday) {
-      continue;
-    }
-    if (bounds.minMs <= bounds.maxMs) {
+    if (bounds.isValid) {
       dates.push(date);
     }
   }
   return dates;
+}
+
+export function isDateAllowed(
+  date: { year: number; month: number; day: number },
+  serverNowMs: number,
+  prepMinutes: number,
+  weeklySchedule: DayScheduleDto[],
+): boolean {
+  return allowedDates(serverNowMs, prepMinutes, weeklySchedule).some((entry) => isSameMoscowDate(entry, date));
 }
 
 export function allowedHourRange(
@@ -170,8 +210,11 @@ export function allowedHourRange(
 ): number[] {
   const min = toMoscowParts(minMs);
   const max = toMoscowParts(maxMs);
-  const minHour = date.year === min.year && date.month === min.month && date.day === min.day ? min.hour : 0;
-  const maxHour = date.year === max.year && date.month === max.month && date.day === max.day ? max.hour : 23;
+  const minHour = isSameMoscowDate(date, min) ? min.hour : 0;
+  const maxHour = isSameMoscowDate(date, max) ? max.hour : 23;
+  if (maxHour < minHour) {
+    return [];
+  }
   return Array.from({ length: maxHour - minHour + 1 }, (_, index) => minHour + index);
 }
 
@@ -183,10 +226,11 @@ export function allowedMinuteRange(
 ): number[] {
   const min = toMoscowParts(minMs);
   const max = toMoscowParts(maxMs);
-  const minMinute =
-    date.year === min.year && date.month === min.month && date.day === min.day && hour === min.hour ? min.minute : 0;
-  const maxMinute =
-    date.year === max.year && date.month === max.month && date.day === max.day && hour === max.hour ? max.minute : 59;
+  const minMinute = isSameMoscowDate(date, min) && hour === min.hour ? min.minute : 0;
+  const maxMinute = isSameMoscowDate(date, max) && hour === max.hour ? max.minute : 59;
+  if (maxMinute < minMinute) {
+    return [];
+  }
   return Array.from({ length: maxMinute - minMinute + 1 }, (_, index) => minMinute + index);
 }
 
@@ -204,7 +248,7 @@ export function canSubmitOrderForSelectedDate(
   return nowMinutes <= parseTimeToMinutes(schedule.last_order_time);
 }
 
-export function clampRequestedTime(
+export function normalizeRequestedTime(
   requestedMs: number,
   serverNowMs: number,
   prepMinutes: number,
@@ -212,6 +256,9 @@ export function clampRequestedTime(
 ): number {
   const selected = toMoscowParts(requestedMs);
   const bounds = pickupBoundsForDate(selected, serverNowMs, prepMinutes, weeklySchedule);
+  if (!bounds.isValid || !isDateAllowed(selected, serverNowMs, prepMinutes, weeklySchedule)) {
+    return findEarliestValidSlot(serverNowMs, prepMinutes, weeklySchedule);
+  }
   if (requestedMs < bounds.minMs) {
     return bounds.minMs;
   }
