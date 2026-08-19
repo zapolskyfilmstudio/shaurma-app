@@ -29,6 +29,14 @@ import {
   parseTimeToMinutes,
   toMoscowParts,
 } from "./timeRules";
+import {
+  isHistoryManagedRoute,
+  pushHistoryRoute,
+  resetHistoryToMain,
+  routeFromPopState,
+  seedHistoryStack,
+  type AppRoute as Route,
+} from "./navigationHistory";
 import type {
   CartItem,
   CategoryDto,
@@ -37,18 +45,6 @@ import type {
   OrderDto,
 } from "./types";
 import "./styles.css";
-
-type Route =
-  | { name: "startup" }
-  | { name: "blocked" }
-  | { name: "main" }
-  | { name: "missing"; title: string }
-  | { name: "category"; categoryId: number }
-  | { name: "product"; itemId: number }
-  | { name: "cart" }
-  | { name: "orders" }
-  | { name: "profile" }
-  | { name: "payment"; result: "success" | "fail"; publicId: string };
 
 const MENU_BUTTONS = [
   "ШАУРМА",
@@ -98,6 +94,8 @@ function App() {
   const buttonGap = viewport.height * 0.85 * 0.03;
 
   const [route, setRoute] = useState<Route>({ name: "startup" });
+  const skipHistoryPush = useRef(false);
+  const historyReady = useRef(false);
   const [message, setMessage] = useState("Загружаем...");
   const [profile, setProfile] = useState<ClientProfile | null>(loadProfile());
   const [categories, setCategories] = useState<CategoryDto[]>([]);
@@ -114,6 +112,51 @@ function App() {
     setCart(items);
     saveCart(items);
   }, []);
+
+  const navigate = useCallback((next: Route) => {
+    setRoute(next);
+  }, []);
+
+  const finishBootstrap = useCallback((next: Route) => {
+    if (!isHistoryManagedRoute(next)) {
+      setRoute(next);
+      return;
+    }
+    skipHistoryPush.current = true;
+    seedHistoryStack(next);
+    historyReady.current = true;
+    setRoute(next);
+  }, []);
+
+  const goMain = useCallback(() => {
+    skipHistoryPush.current = true;
+    resetHistoryToMain();
+    setRoute({ name: "main" });
+  }, []);
+
+  const goCart = useCallback(() => navigate({ name: "cart" }), [navigate]);
+  const goProfile = useCallback(() => navigate({ name: "profile" }), [navigate]);
+  const goBack = useCallback(() => {
+    window.history.back();
+  }, []);
+
+  useEffect(() => {
+    const onPopState = (event: PopStateEvent) => {
+      skipHistoryPush.current = true;
+      setRoute(routeFromPopState(event.state));
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
+
+  useEffect(() => {
+    if (!historyReady.current || !isHistoryManagedRoute(route)) return;
+    if (skipHistoryPush.current) {
+      skipHistoryPush.current = false;
+      return;
+    }
+    pushHistoryRoute(route);
+  }, [route]);
 
   const bootstrap = useCallback(async () => {
     setMessage("Подключаемся...");
@@ -137,7 +180,7 @@ function App() {
     setPaymentEnabled(config.payment_enabled);
     setCategories(menu.categories);
     if (init.is_blocked) {
-      setRoute({ name: "blocked" });
+      finishBootstrap({ name: "blocked" });
       return;
     }
     const params = new URLSearchParams(window.location.search);
@@ -145,15 +188,15 @@ function App() {
     const pendingOrder = getPendingOrderId();
     if ((paymentResult === "success" || paymentResult === "fail") && pendingOrder) {
       window.history.replaceState({}, "", window.location.pathname);
-      setRoute({ name: "payment", result: paymentResult, publicId: pendingOrder });
+      finishBootstrap({ name: "payment", result: paymentResult, publicId: pendingOrder });
       return;
     }
     if (loadCartDraft().items.length > 0) {
-      setRoute({ name: "cart" });
+      finishBootstrap({ name: "cart" });
       return;
     }
-    setRoute({ name: "main" });
-  }, []);
+    finishBootstrap({ name: "main" });
+  }, [finishBootstrap]);
 
   useEffect(() => {
     void bootstrap().catch((error) => setMessage(error instanceof Error ? error.message : "Ошибка загрузки"));
@@ -167,9 +210,6 @@ function App() {
     [categories],
   );
 
-  const goMain = () => setRoute({ name: "main" });
-  const goCart = () => setRoute({ name: "cart" });
-  const goProfile = () => setRoute({ name: "profile" });
   const cartCount = cart.length;
 
   if (route.name === "startup") {
@@ -199,9 +239,9 @@ function App() {
         buttonGap={buttonGap}
         onProfile={goProfile}
         onCart={goCart}
-        onCategory={(categoryId) => setRoute({ name: "category", categoryId })}
-        onMissing={(title) => setRoute({ name: "missing", title })}
-        onOrders={() => setRoute({ name: "orders" })}
+        onCategory={(categoryId) => navigate({ name: "category", categoryId })}
+        onMissing={(title) => navigate({ name: "missing", title })}
+        onOrders={() => navigate({ name: "orders" })}
         findCategoryByTitle={findCategoryByTitle}
         cartCount={cartCount}
       />
@@ -231,7 +271,7 @@ function App() {
               key={item.id}
               type="button"
               className="card"
-              onClick={() => setRoute({ name: "product", itemId: item.id })}
+              onClick={() => navigate({ name: "product", itemId: item.id })}
             >
               <strong>{item.name}</strong>
               {item.description && <p className="text-muted">{item.description}</p>}
@@ -254,7 +294,7 @@ function App() {
         buttonWidth={buttonWidth}
         buttonHeight={buttonHeight}
         onBack={() => {
-          if (productItem) setRoute({ name: "category", categoryId: productItem.category_id });
+          if (productItem) goBack();
           else goMain();
         }}
         onAdded={(item) => {
@@ -282,13 +322,13 @@ function App() {
         onProfile={goProfile}
         onEdit={(menuItemId) => {
           persistCart(cart.filter((entry) => entry.menuItemId !== menuItemId));
-          setRoute({ name: "product", itemId: menuItemId });
+          navigate({ name: "product", itemId: menuItemId });
         }}
         onCartChange={persistCart}
         onOrdered={() => {
           clearCartDraft();
           setCart([]);
-          setRoute({ name: "orders" });
+          navigate({ name: "orders" });
         }}
         paymentEnabled={paymentEnabled}
       />
@@ -306,7 +346,7 @@ function App() {
         onHome={goMain}
         onOrders={() => {
           clearPendingOrderId();
-          setRoute({ name: "orders" });
+          navigate({ name: "orders" });
         }}
         cartCount={cartCount}
       />
