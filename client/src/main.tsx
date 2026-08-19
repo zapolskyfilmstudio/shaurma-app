@@ -78,6 +78,25 @@ function formatMenuItemMeta(item: MenuItemDto, categoryName: string): string {
   return parts.join(" · ");
 }
 
+const SHAWARMA_REMOVAL_ORDER = ["капуста", "морковь", "помидор", "огурец"];
+
+function sortShawarmaRemovals(removals: MenuItemDto["removals"]): MenuItemDto["removals"] {
+  return [...removals].sort((left, right) => {
+    const leftIndex = SHAWARMA_REMOVAL_ORDER.indexOf(left.name.toLowerCase());
+    const rightIndex = SHAWARMA_REMOVAL_ORDER.indexOf(right.name.toLowerCase());
+    return (leftIndex === -1 ? 999 : leftIndex) - (rightIndex === -1 ? 999 : rightIndex);
+  });
+}
+
+function formatNeKlastLine(removalNames: string): string | null {
+  const trimmed = removalNames.trim();
+  return trimmed ? `НЕ КЛАСТЬ: ${trimmed}` : null;
+}
+
+function toggleRemovalId(current: number[], removalId: number): number[] {
+  return current.includes(removalId) ? current.filter((id) => id !== removalId) : [...current, removalId];
+}
+
 function paymentStatusLabel(status: string): string {
   switch (status) {
     case "WAITING":
@@ -549,7 +568,7 @@ function ProductScreen({
         {resolved.description && <p className="text-muted">{resolved.description}</p>}
         <p>{productMeta}</p>
         <p>Цена: {formatMoney(totalPrice)}</p>
-        {showRemovalsOption && resolved.removals.length > 0 && (
+        {showRemovalsOption && (
           <MenuButton text="НЕ КЛАСТЬ" width={buttonWidth} height={buttonHeight} fontSize={18} onClick={() => setShowRemovals(true)} />
         )}
         <MenuButton
@@ -563,22 +582,24 @@ function ProductScreen({
       </div>
       {showRemovals && (
         <div className="modal-backdrop" onClick={() => setShowRemovals(false)}>
-          <div className="modal" onClick={(event) => event.stopPropagation()}>
-            <strong>Не класть</strong>
-            {resolved.removals.map((removal) => (
-              <label key={removal.id} className="check-row">
-                <span>{removal.name}</span>
-                <input
-                  type="checkbox"
-                  checked={selectedRemovals.includes(removal.id)}
-                  onChange={() =>
-                    setSelectedRemovals((current) =>
-                      current.includes(removal.id) ? current.filter((id) => id !== removal.id) : [...current, removal.id],
-                    )
-                  }
-                />
-              </label>
-            ))}
+          <div className="modal modal-large removal-modal" onClick={(event) => event.stopPropagation()}>
+            <strong className="removal-modal-title">НЕ КЛАСТЬ</strong>
+            <div className="removal-list">
+              {sortShawarmaRemovals(resolved.removals).map((removal) => {
+                const selected = selectedRemovals.includes(removal.id);
+                return (
+                  <button
+                    key={removal.id}
+                    type="button"
+                    className="removal-option"
+                    onClick={() => setSelectedRemovals((current) => toggleRemovalId(current, removal.id))}
+                  >
+                    <span className={`removal-toggle${selected ? " is-selected" : ""}`} aria-hidden="true" />
+                    <span>{removal.name}</span>
+                  </button>
+                );
+              })}
+            </div>
             <MenuButton text="Готово" width={buttonWidth * 0.6} height={44} fontSize={18} onClick={() => setShowRemovals(false)} />
           </div>
         </div>
@@ -744,10 +765,12 @@ function CartScreen({
   return (
     <ScreenLayout topHeight={topHeight} left="home" right="profile" onLeft={onHome} onRight={onProfile}>
       <div className="list-screen">
-        {cart.map((item) => (
+        {cart.map((item) => {
+          const neKlastLine = formatNeKlastLine(item.removalNames);
+          return (
           <div key={item.id} className="card" style={{ width: contentWidth }}>
             <strong>{item.name}</strong>
-            {item.removalNames && <p>Не класть: {item.removalNames}</p>}
+            {neKlastLine && <p>{neKlastLine}</p>}
             <p>
               Вес: {item.weight} г · Цена: {formatMoney(item.totalPrice)}
             </p>
@@ -769,7 +792,8 @@ function CartScreen({
               />
             </div>
           </div>
-        ))}
+          );
+        })}
         <p style={{ width: contentWidth }}>Итого: {formatMoney(cart.reduce((sum, item) => sum + item.totalPrice, 0))}</p>
         <textarea
           className="textarea"

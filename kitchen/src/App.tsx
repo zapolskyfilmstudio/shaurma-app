@@ -361,7 +361,7 @@ function OrderCard({
               <p>✅ {item.additions_snapshot.map((addition) => `${addition.name} +${formatMoney(addition.price)}`).join(", ")}</p>
             )}
             {item.removals_snapshot.length > 0 && (
-              <p>❌ {item.removals_snapshot.map((removal) => removal.name).join(", ")}</p>
+              <p>НЕ КЛАСТЬ: {item.removals_snapshot.map((removal) => removal.name).join(", ")}</p>
             )}
           </div>
         ))}

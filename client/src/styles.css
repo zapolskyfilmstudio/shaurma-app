@@ -243,6 +243,73 @@ button.card {
   gap: 10px;
 }
 
+.modal-large {
+  width: 75vw;
+  height: 75dvh;
+  max-width: none;
+  max-height: none;
+}
+
+.removal-modal {
+  justify-content: space-between;
+}
+
+.removal-modal-title {
+  text-align: center;
+  font-size: 1.1em;
+}
+
+.removal-list {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 20px;
+  overflow: auto;
+}
+
+.removal-option {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  border: 0;
+  background: transparent;
+  color: #fff;
+  cursor: pointer;
+  text-align: left;
+  padding: 10px 0;
+  font-size: 1em;
+}
+
+.removal-toggle {
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  border: 2px solid #fff;
+  border-radius: 6px;
+  position: relative;
+}
+
+.removal-toggle.is-selected::before,
+.removal-toggle.is-selected::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 78%;
+  height: 3px;
+  background: #e53935;
+  border-radius: 999px;
+}
+
+.removal-toggle.is-selected::before {
+  transform: translate(-50%, -50%) rotate(45deg);
+}
+
+.removal-toggle.is-selected::after {
+  transform: translate(-50%, -50%) rotate(-45deg);
+}
+
 .check-row {
   display: flex;
   justify-content: space-between;
