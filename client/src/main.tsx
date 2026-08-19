@@ -148,7 +148,7 @@ function App() {
   const [paymentEnabled, setPaymentEnabled] = useState(false);
   const [serverOffset, setServerOffset] = useState(profile?.serverTimeOffsetMs ?? 0);
 
-  const serverNow = () => Date.now() + serverOffset;
+  const serverNow = useCallback(() => Date.now() + serverOffset, [serverOffset]);
 
   const persistCart = useCallback((items: CartItem[]) => {
     setCart(items);
@@ -702,12 +702,13 @@ function CartScreen({
     return () => window.clearInterval(timer);
   }, [maxCooking, scheduleReady, weeklySchedule]);
 
+  const nowMs = serverNow();
   const selected = toMoscowParts(requestedTime);
-  const dates = scheduleReady ? allowedDates(serverNow(), maxCooking, weeklySchedule) : [];
+  const dates = scheduleReady ? allowedDates(nowMs, maxCooking, weeklySchedule) : [];
   const selectedInAllowed = dates.some((date) => isSameMoscowDate(date, selected));
   const effectiveSelected = selectedInAllowed && dates.length > 0 ? selected : dates[0] ?? selected;
   const selectedBounds = scheduleReady
-    ? pickupBoundsForDate(effectiveSelected, serverNow(), maxCooking, weeklySchedule)
+    ? pickupBoundsForDate(effectiveSelected, nowMs, maxCooking, weeklySchedule)
     : { minMs: requestedTime, maxMs: requestedTime, canAcceptOrderToday: true, isValid: false };
   const years = [...new Set(dates.map((date) => date.year))];
   const months = dates.filter((date) => date.year === effectiveSelected.year).map((date) => date.month);
@@ -717,8 +718,10 @@ function CartScreen({
   const hourRange = selectedBounds.isValid
     ? allowedHourRange(effectiveSelected, selectedBounds.minMs, selectedBounds.maxMs)
     : [];
+  const displayTime = toMoscowParts(requestedTime);
+  const pickerHour = selectedInAllowed ? displayTime.hour : (hourRange[0] ?? toMoscowParts(selectedBounds.minMs).hour);
   const minuteRange = selectedBounds.isValid
-    ? allowedMinuteRange(effectiveSelected, toMoscowParts(requestedTime).hour, selectedBounds.minMs, selectedBounds.maxMs)
+    ? allowedMinuteRange(effectiveSelected, pickerHour, selectedBounds.minMs, selectedBounds.maxMs)
     : [];
   const isTimeValid =
     scheduleReady &&
@@ -726,16 +729,16 @@ function CartScreen({
     selectedInAllowed &&
     requestedTime >= selectedBounds.minMs &&
     requestedTime <= selectedBounds.maxMs &&
-    canSubmitOrderForSelectedDate(effectiveSelected, serverNow(), weeklySchedule);
+    canSubmitOrderForSelectedDate(effectiveSelected, nowMs, weeklySchedule);
   const hasDifferentCookingTimes = new Set(cart.map((item) => item.cookingTime)).size > 1;
   const selectedDaySchedule = scheduleReady ? scheduleForDate(effectiveSelected, weeklySchedule) : null;
 
   useEffect(() => {
     if (!scheduleReady || !selectedBounds.isValid) return;
     if (!selectedInAllowed || requestedTime < selectedBounds.minMs || requestedTime > selectedBounds.maxMs) {
-      setRequestedTime(normalizeRequestedTime(requestedTime, serverNow(), maxCooking, weeklySchedule));
+      setRequestedTime(normalizeRequestedTime(requestedTime, nowMs, maxCooking, weeklySchedule));
     }
-  }, [scheduleReady, selectedInAllowed, selectedBounds.minMs, selectedBounds.maxMs, requestedTime, maxCooking, weeklySchedule, serverNow]);
+  }, [scheduleReady, selectedInAllowed, selectedBounds.isValid, selectedBounds.minMs, selectedBounds.maxMs, requestedTime, maxCooking, weeklySchedule, nowMs]);
 
   const setDate = (year: number, month: number, day: number) => {
     userPickedTime.current = true;
@@ -765,8 +768,6 @@ function CartScreen({
       ),
     );
   };
-
-  const displayTime = toMoscowParts(requestedTime);
 
   const submit = async () => {
     if (!isTimeValid) return;

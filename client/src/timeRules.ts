@@ -1,6 +1,8 @@
 import type { DayScheduleDto } from "./types";
 
 const MOSCOW = "Europe/Moscow";
+/** Moscow has been UTC+3 year-round since 2014-10-26. */
+const MOSCOW_UTC_OFFSET_MINUTES = 180;
 const WEEKDAY_TO_ISO: Record<string, number> = {
   Mon: 1,
   Tue: 2,
@@ -26,27 +28,13 @@ export function toMoscowParts(ms: number) {
     year: get("year"),
     month: get("month"),
     day: get("day"),
-    hour: get("hour"),
+    hour: get("hour") % 24,
     minute: get("minute"),
   };
 }
 
 export function moscowToMs(year: number, month: number, day: number, hour: number, minute: number): number {
-  const utc = Date.UTC(year, month - 1, day, hour, minute, 0, 0);
-  const probe = new Date(utc);
-  const fmt = new Intl.DateTimeFormat("en-US", {
-    timeZone: MOSCOW,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).formatToParts(probe);
-  const get = (type: string) => Number(fmt.find((p) => p.type === type)?.value ?? "0");
-  const shownHour = get("hour") % 24;
-  const diffMinutes = (hour - shownHour) * 60 + (minute - get("minute"));
-  return utc - diffMinutes * 60_000;
+  return Date.UTC(year, month - 1, day, hour, minute, 0, 0) - MOSCOW_UTC_OFFSET_MINUTES * 60_000;
 }
 
 export function parseTimeToMinutes(value: string): number {
