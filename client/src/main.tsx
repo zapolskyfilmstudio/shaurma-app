@@ -370,7 +370,7 @@ function MainScreen({
 }) {
   const [fontSize, setFontSize] = useState(28);
   return (
-    <ScreenLayout topHeight={topHeight} left="profile" right="cart" onLeft={onProfile} onRight={onCart} cartCount={cartCount} mainMenu>
+    <ScreenLayout topHeight={topHeight} left="profile" right="cart" onLeft={onProfile} onRight={onCart} cartCount={cartCount}>
       <div className="centered-column" style={{ gap: buttonGap }}>
         {MENU_BUTTONS.map((title) => (
           <MenuButton
@@ -379,7 +379,6 @@ function MainScreen({
             width={buttonWidth}
             height={buttonHeight}
             fontSize={fontSize}
-            variant="nav"
             onOverflow={() => setFontSize((value) => value * 0.9)}
             onClick={() => {
               if (title === "МОИ ЗАКАЗЫ") {
@@ -705,7 +704,6 @@ function CartScreen({
                 width={contentWidth * 0.42}
                 height={buttonHeight}
                 fontSize={fontSize}
-                variant="action"
                 onOverflow={() => setFontSize((value) => value * 0.9)}
                 onClick={() => onEdit(item.menuItemId)}
               />
@@ -714,7 +712,6 @@ function CartScreen({
                 width={contentWidth * 0.42}
                 height={buttonHeight}
                 fontSize={fontSize}
-                variant="action"
                 onClick={() => onCartChange(cart.filter((entry) => entry.id !== item.id))}
               />
             </div>
@@ -790,13 +787,12 @@ function CartScreen({
             Онлайн-оплата временно недоступна — администратор должен настроить T-Bank на сервере.
           </p>
         )}
-        <MenuButton text="Добавить к заказу" width={buttonWidth} height={buttonHeight} fontSize={fontSize} variant="action" onClick={onHome} />
+        <MenuButton text="Добавить к заказу" width={buttonWidth} height={buttonHeight} fontSize={fontSize} onClick={onHome} />
         <MenuButton
           text={submitting ? "Оформляем..." : "Оформить заказ"}
           width={buttonWidth}
           height={buttonHeight}
           fontSize={fontSize}
-          variant="action"
           enabled={isTimeValid && !submitting && paymentEnabled}
           onClick={() => void submit()}
         />
@@ -1096,7 +1092,6 @@ function ProfileScreen({
           width={buttonWidth}
           height={buttonHeight}
           fontSize={fontSize}
-          variant="action"
           onOverflow={() => setFontSize((value) => value * 0.9)}
           enabled={!saving}
           onClick={() => void save()}

@@ -1,10 +1,4 @@
 @font-face {
-  font-family: "MT Corsiva";
-  src: url("/fonts/mtcorsva.ttf") format("truetype");
-  font-display: swap;
-}
-
-@font-face {
   font-family: "Hirro Sans";
   src: url("/fonts/HirroSans.ttf") format("truetype");
   font-display: swap;
@@ -13,10 +7,6 @@
 :root {
   color-scheme: dark;
   font-family: "Hirro Sans", sans-serif;
-}
-
-html {
-  font-size: 150%;
 }
 
 * {
@@ -51,9 +41,9 @@ button {
   flex-direction: column;
 }
 
-.screen-main {
-  font-family: "MT Corsiva", cursive, serif;
-  font-size: 66.6667%;
+.content-zone {
+  overflow: auto;
+  font-size: 150%;
 }
 
 .top-zone {
@@ -88,10 +78,6 @@ button {
   pointer-events: none;
 }
 
-.content-zone {
-  overflow: auto;
-}
-
 .centered-column {
   display: flex;
   flex-direction: column;
@@ -102,6 +88,14 @@ button {
   padding: 0 10%;
 }
 
+.screen > .centered-column {
+  font-size: 150%;
+}
+
+.screen > .centered-column .menu-btn {
+  font-size: 66.6667%;
+}
+
 .menu-btn {
   border: 2px solid #fff;
   border-radius: 12px;
@@ -110,11 +104,7 @@ button {
   white-space: nowrap;
   overflow: hidden;
   cursor: pointer;
-}
-
-.menu-btn--nav,
-.menu-btn--action {
-  font-family: "MT Corsiva", cursive, serif;
+  font-size: 66.6667%;
 }
 
 .menu-btn:disabled {
