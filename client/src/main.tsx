@@ -730,7 +730,6 @@ function CartScreen({
     requestedTime >= selectedBounds.minMs &&
     requestedTime <= selectedBounds.maxMs &&
     canSubmitOrderForSelectedDate(effectiveSelected, nowMs, weeklySchedule);
-  const hasDifferentCookingTimes = new Set(cart.map((item) => item.cookingTime)).size > 1;
   const selectedDaySchedule = scheduleReady ? scheduleForDate(effectiveSelected, weeklySchedule) : null;
 
   useEffect(() => {
@@ -905,11 +904,6 @@ function CartScreen({
             {selectedDaySchedule
               ? `Выберите время от ${selectedDaySchedule.open_time} + ${maxCooking} мин до ${selectedDaySchedule.last_order_time} + ${maxCooking} мин. На сегодня заказ принимаем до ${selectedDaySchedule.last_order_time}.`
               : "Загружаем расписание..."}
-          </p>
-        )}
-        {hasDifferentCookingTimes && (
-          <p className="text-muted" style={{ width: contentWidth }}>
-            Ваш заказ будет готов через {maxCooking} минут. Если вы хотите получить часть заказа раньше, оформите два заказа отдельно.
           </p>
         )}
         {error && <p className="text-error">{error}</p>}
