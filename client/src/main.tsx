@@ -595,7 +595,7 @@ function ProductScreen({
                     onClick={() => setSelectedRemovals((current) => toggleRemovalId(current, removal.id))}
                   >
                     <span className={`removal-toggle${selected ? " is-selected" : ""}`} aria-hidden="true" />
-                    <span>{removal.name}</span>
+                    <span className="removal-option-label">{removal.name}</span>
                   </button>
                 );
               })}

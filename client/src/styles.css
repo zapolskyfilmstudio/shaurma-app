@@ -235,6 +235,7 @@ button.card {
   left: 0;
   right: 0;
   bottom: 0;
+  padding: 12px;
 }
 
 .modal {
@@ -257,41 +258,61 @@ button.card {
   max-height: none;
 }
 
-.removal-modal-actions {
-  display: flex;
-  justify-content: center;
-  width: 100%;
-}
-
 .removal-modal {
-  justify-content: space-between;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 20px;
+  padding: 24px 20px 20px;
+  overflow: hidden;
+  font-size: 18px;
+  line-height: 1.25;
 }
 
 .removal-modal-title {
+  margin: 0;
+  padding: 4px 8px 0;
   text-align: center;
-  font-size: 1.1em;
+  font-size: 1.15em;
+  letter-spacing: 0.06em;
 }
 
 .removal-list {
-  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   justify-content: center;
-  gap: 20px;
-  overflow: auto;
+  gap: clamp(14px, 2.8vh, 28px);
+  width: min(100%, 300px);
+  margin: 0 auto;
+  padding: 8px 4px;
 }
 
 .removal-option {
   display: flex;
   align-items: center;
   gap: 16px;
+  min-height: 48px;
   border: 0;
   background: transparent;
   color: #fff;
   cursor: pointer;
   text-align: left;
-  padding: 10px 0;
-  font-size: 1em;
+  padding: 6px 0;
+  font-size: 1.05em;
+  flex-shrink: 0;
+}
+
+.removal-option-label {
+  flex: 1;
+}
+
+.removal-modal-actions {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+  padding-top: 4px;
+  flex-shrink: 0;
 }
 
 .removal-toggle {
