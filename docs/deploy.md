@@ -30,6 +30,12 @@ MVP запускается одинаково на ноутбуке и на VPS:
 
 ## Запуск
 
+После изменения `BEARER_TOKEN` или `VITE_BEARER_TOKEN` пересоберите nginx (кухня и клиент):
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up --build -d nginx
+```
+
 ```bash
 docker compose up --build -d
 ```
