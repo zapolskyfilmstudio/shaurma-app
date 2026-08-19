@@ -1,4 +1,5 @@
 import { StrictMode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { createRoot } from "react-dom/client";
 import { api } from "./api";
 import { MenuButton, ScreenLayout, WheelPicker } from "./components";
@@ -340,6 +341,7 @@ function App() {
       <ProductScreen
         item={productItem}
         topHeight={topHeight}
+        viewport={viewport}
         buttonWidth={buttonWidth}
         buttonHeight={buttonHeight}
         onBack={() => {
@@ -493,6 +495,7 @@ function MainScreen({
 function ProductScreen({
   item,
   topHeight,
+  viewport,
   buttonWidth,
   buttonHeight,
   onBack,
@@ -503,6 +506,7 @@ function ProductScreen({
 }: {
   item: (MenuItemDto & { category: CategoryDto }) | null;
   topHeight: number;
+  viewport: { width: number; height: number };
   buttonWidth: number;
   buttonHeight: number;
   onBack: () => void;
@@ -529,6 +533,10 @@ function ProductScreen({
 
   const categoryName = resolved.category.name;
   const showRemovalsOption = isShawarmaCategory(categoryName);
+  const contentHeight = viewport.height - topHeight;
+  const modalWidth = Math.round(viewport.width * 0.75);
+  const modalHeight = Math.round(contentHeight * 0.75);
+  const doneButtonWidth = Math.round(modalWidth * 0.55);
 
   const totalPrice = resolved.price;
 
@@ -580,32 +588,49 @@ function ProductScreen({
           onClick={addToCart}
         />
       </div>
-      {showRemovals && (
-        <div className="modal-backdrop modal-backdrop-content" style={{ top: topHeight }} onClick={() => setShowRemovals(false)}>
-          <div className="modal modal-large removal-modal" onClick={(event) => event.stopPropagation()}>
-            <strong className="removal-modal-title">НЕ КЛАСТЬ</strong>
-            <div className="removal-list">
-              {sortShawarmaRemovals(resolved.removals).map((removal) => {
-                const selected = selectedRemovals.includes(removal.id);
-                return (
-                  <button
-                    key={removal.id}
-                    type="button"
-                    className="removal-option"
-                    onClick={() => setSelectedRemovals((current) => toggleRemovalId(current, removal.id))}
-                  >
-                    <span className={`removal-toggle${selected ? " is-selected" : ""}`} aria-hidden="true" />
-                    <span className="removal-option-label">{removal.name}</span>
-                  </button>
-                );
-              })}
+      {showRemovalsOption &&
+        showRemovals &&
+        createPortal(
+          <div
+            className="removal-modal-backdrop"
+            style={{ top: topHeight, height: contentHeight }}
+            onClick={() => setShowRemovals(false)}
+          >
+            <div
+              className="removal-modal-panel"
+              style={{ width: modalWidth, height: modalHeight }}
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className="removal-modal-header">НЕ КЛАСТЬ</div>
+              <div className="removal-modal-body">
+                {sortShawarmaRemovals(resolved.removals).map((removal) => {
+                  const selected = selectedRemovals.includes(removal.id);
+                  return (
+                    <button
+                      key={removal.id}
+                      type="button"
+                      className="removal-option"
+                      onClick={() => setSelectedRemovals((current) => toggleRemovalId(current, removal.id))}
+                    >
+                      <span className={`removal-toggle${selected ? " is-selected" : ""}`} aria-hidden="true" />
+                      <span className="removal-option-label">{removal.name}</span>
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="removal-modal-footer">
+                <MenuButton
+                  text="Готово"
+                  width={doneButtonWidth}
+                  height={44}
+                  fontSize={18}
+                  onClick={() => setShowRemovals(false)}
+                />
+              </div>
             </div>
-            <div className="removal-modal-actions">
-              <MenuButton text="Готово" width={buttonWidth * 0.6} height={44} fontSize={18} onClick={() => setShowRemovals(false)} />
-            </div>
-          </div>
-        </div>
-      )}
+          </div>,
+          document.body,
+        )}
     </ScreenLayout>
   );
 }

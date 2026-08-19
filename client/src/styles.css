@@ -251,55 +251,86 @@ button.card {
   gap: 10px;
 }
 
-.modal-large {
-  width: 75%;
-  height: 75%;
-  max-width: none;
-  max-height: none;
+.modal-backdrop-content {
+  inset: auto;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 12px;
 }
 
-.removal-modal {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
-  gap: 20px;
-  padding: 24px 20px 20px;
+.removal-modal-backdrop {
+  position: fixed;
+  left: 0;
+  right: 0;
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+  background: rgba(0, 0, 0, 0.75);
+  box-sizing: border-box;
+}
+
+.removal-modal-panel {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
+  background: #000;
+  border: 2px solid #fff;
+  border-radius: 12px;
+  color: #fff;
+  font-size: 17px;
+  line-height: 1.3;
+}
+
+.removal-modal-header {
+  flex: 0 0 52px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
   font-size: 18px;
-  line-height: 1.25;
+  letter-spacing: 0.08em;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.2);
 }
 
-.removal-modal-title {
-  margin: 0;
-  padding: 4px 8px 0;
-  text-align: center;
-  font-size: 1.15em;
-  letter-spacing: 0.06em;
-}
-
-.removal-list {
+.removal-modal-body {
+  flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
+  justify-content: space-evenly;
+  gap: 10px;
+  padding: 16px 28px;
+}
+
+.removal-modal-footer {
+  flex: 0 0 68px;
+  display: flex;
+  align-items: center;
   justify-content: center;
-  gap: clamp(14px, 2.8vh, 28px);
-  width: min(100%, 300px);
-  margin: 0 auto;
-  padding: 8px 4px;
+  border-top: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.removal-modal-footer .menu-btn {
+  font-size: 18px;
 }
 
 .removal-option {
   display: flex;
   align-items: center;
   gap: 16px;
-  min-height: 48px;
+  min-height: 44px;
   border: 0;
   background: transparent;
   color: #fff;
   cursor: pointer;
   text-align: left;
-  padding: 6px 0;
-  font-size: 1.05em;
+  padding: 4px 0;
+  font-size: 17px;
   flex-shrink: 0;
 }
 
@@ -307,17 +338,9 @@ button.card {
   flex: 1;
 }
 
-.removal-modal-actions {
-  display: flex;
-  justify-content: center;
-  width: 100%;
-  padding-top: 4px;
-  flex-shrink: 0;
-}
-
 .removal-toggle {
-  width: 40px;
-  height: 40px;
+  width: 36px;
+  height: 36px;
   flex-shrink: 0;
   border: 2px solid #fff;
   border-radius: 6px;
