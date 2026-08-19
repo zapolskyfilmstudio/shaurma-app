@@ -32,9 +32,10 @@ import {
 import {
   isHistoryManagedRoute,
   pushHistoryRoute,
+  readRouteFromLocation,
   resetHistoryToMain,
-  routeFromPopState,
   seedHistoryStack,
+  seedInitialBrowserHistory,
   type AppRoute as Route,
 } from "./navigationHistory";
 import type {
@@ -45,6 +46,8 @@ import type {
   OrderDto,
 } from "./types";
 import "./styles.css";
+
+seedInitialBrowserHistory();
 
 const MENU_BUTTONS = [
   "ШАУРМА",
@@ -94,8 +97,7 @@ function App() {
   const buttonGap = viewport.height * 0.85 * 0.03;
 
   const [route, setRoute] = useState<Route>({ name: "startup" });
-  const skipHistoryPush = useRef(false);
-  const historyReady = useRef(false);
+  const skipHistorySync = useRef(false);
   const [message, setMessage] = useState("Загружаем...");
   const [profile, setProfile] = useState<ClientProfile | null>(loadProfile());
   const [categories, setCategories] = useState<CategoryDto[]>([]);
@@ -114,6 +116,12 @@ function App() {
   }, []);
 
   const navigate = useCallback((next: Route) => {
+    if (!isHistoryManagedRoute(next)) {
+      setRoute(next);
+      return;
+    }
+    skipHistorySync.current = true;
+    pushHistoryRoute(next);
     setRoute(next);
   }, []);
 
@@ -122,14 +130,13 @@ function App() {
       setRoute(next);
       return;
     }
-    skipHistoryPush.current = true;
+    skipHistorySync.current = true;
     seedHistoryStack(next);
-    historyReady.current = true;
     setRoute(next);
   }, []);
 
   const goMain = useCallback(() => {
-    skipHistoryPush.current = true;
+    skipHistorySync.current = true;
     resetHistoryToMain();
     setRoute({ name: "main" });
   }, []);
@@ -141,22 +148,30 @@ function App() {
   }, []);
 
   useEffect(() => {
-    const onPopState = (event: PopStateEvent) => {
-      skipHistoryPush.current = true;
-      setRoute(routeFromPopState(event.state));
+    const syncRouteFromBrowser = (state?: unknown) => {
+      skipHistorySync.current = true;
+      setRoute(readRouteFromLocation(state));
     };
-    window.addEventListener("popstate", onPopState);
-    return () => window.removeEventListener("popstate", onPopState);
-  }, []);
 
-  useEffect(() => {
-    if (!historyReady.current || !isHistoryManagedRoute(route)) return;
-    if (skipHistoryPush.current) {
-      skipHistoryPush.current = false;
-      return;
-    }
-    pushHistoryRoute(route);
-  }, [route]);
+    const onPopState = (event: PopStateEvent) => {
+      syncRouteFromBrowser(event.state);
+    };
+
+    const onHashChange = () => {
+      if (skipHistorySync.current) {
+        skipHistorySync.current = false;
+        return;
+      }
+      syncRouteFromBrowser();
+    };
+
+    window.addEventListener("popstate", onPopState);
+    window.addEventListener("hashchange", onHashChange);
+    return () => {
+      window.removeEventListener("popstate", onPopState);
+      window.removeEventListener("hashchange", onHashChange);
+    };
+  }, []);
 
   const bootstrap = useCallback(async () => {
     setMessage("Подключаемся...");
@@ -187,7 +202,6 @@ function App() {
     const paymentResult = params.get("payment");
     const pendingOrder = getPendingOrderId();
     if ((paymentResult === "success" || paymentResult === "fail") && pendingOrder) {
-      window.history.replaceState({}, "", window.location.pathname);
       finishBootstrap({ name: "payment", result: paymentResult, publicId: pendingOrder });
       return;
     }

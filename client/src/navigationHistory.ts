@@ -14,9 +14,8 @@ type HistoryState = {
   appRoute?: string;
 };
 
-function historyPathname(): string {
-  return window.location.pathname;
-}
+const MAIN_HASH = "#/";
+const MAIN_KEY = "main";
 
 export function serializeRoute(route: AppRoute): string {
   switch (route.name) {
@@ -62,33 +61,93 @@ export function deserializeRoute(key: string): AppRoute | null {
   return null;
 }
 
-export function seedHistoryStack(route: AppRoute): void {
-  const pathname = historyPathname();
-  const mainKey = serializeRoute({ name: "main" });
-  window.history.replaceState({ appRoute: mainKey } satisfies HistoryState, "", pathname);
-  if (route.name === "main") {
-    window.history.pushState({ appRoute: mainKey } satisfies HistoryState, "", pathname);
+export function routeToHash(route: AppRoute): string {
+  switch (route.name) {
+    case "main":
+      return MAIN_HASH;
+    case "cart":
+      return "#/cart";
+    case "orders":
+      return "#/orders";
+    case "profile":
+      return "#/profile";
+    case "category":
+      return `#/category/${route.categoryId}`;
+    case "product":
+      return `#/product/${route.itemId}`;
+    case "missing":
+      return `#/missing/${encodeURIComponent(route.title)}`;
+    case "payment":
+      return `#/payment/${route.result}/${encodeURIComponent(route.publicId)}`;
+    default:
+      return MAIN_HASH;
+  }
+}
+
+export function hashToRoute(hash: string): AppRoute | null {
+  const normalized = hash.replace(/^#/, "").replace(/^\//, "");
+  if (normalized === "" || normalized === "main") return { name: "main" };
+  if (normalized === "cart") return { name: "cart" };
+  if (normalized === "orders") return { name: "orders" };
+  if (normalized === "profile") return { name: "profile" };
+
+  const segments = normalized.split("/").filter(Boolean);
+  const [head, second] = segments;
+  if (head === "category") {
+    const categoryId = Number(second);
+    return Number.isFinite(categoryId) ? { name: "category", categoryId } : null;
+  }
+  if (head === "product") {
+    const itemId = Number(second);
+    return Number.isFinite(itemId) ? { name: "product", itemId } : null;
+  }
+  if (head === "missing" && second) {
+    return { name: "missing", title: decodeURIComponent(second) };
+  }
+  if (head === "payment" && (second === "success" || second === "fail")) {
+    const publicId = decodeURIComponent(segments.slice(2).join("/"));
+    if (publicId) return { name: "payment", result: second, publicId };
+  }
+  return null;
+}
+
+function historyUrl(hash: string): string {
+  return `${window.location.pathname}${hash}`;
+}
+
+function writeHistory(route: AppRoute, mode: "push" | "replace"): void {
+  const hash = routeToHash(route);
+  const state = { appRoute: serializeRoute(route) } satisfies HistoryState;
+  const url = historyUrl(hash);
+  if (mode === "replace") {
+    window.history.replaceState(state, "", url);
     return;
   }
-  window.history.pushState({ appRoute: serializeRoute(route) } satisfies HistoryState, "", pathname);
+  window.history.pushState(state, "", url);
+}
+
+export function seedHistoryStack(route: AppRoute): void {
+  writeHistory({ name: "main" }, "replace");
+  if (route.name === "main") {
+    writeHistory({ name: "main" }, "push");
+    return;
+  }
+  writeHistory(route, "push");
 }
 
 export function pushHistoryRoute(route: AppRoute): void {
-  window.history.pushState(
-    { appRoute: serializeRoute(route) } satisfies HistoryState,
-    "",
-    historyPathname(),
-  );
+  writeHistory(route, "push");
 }
 
 export function resetHistoryToMain(): void {
-  const pathname = historyPathname();
-  const mainKey = serializeRoute({ name: "main" });
-  window.history.replaceState({ appRoute: mainKey } satisfies HistoryState, "", pathname);
-  window.history.pushState({ appRoute: mainKey } satisfies HistoryState, "", pathname);
+  writeHistory({ name: "main" }, "replace");
+  writeHistory({ name: "main" }, "push");
 }
 
-export function routeFromPopState(state: unknown): AppRoute {
+export function readRouteFromLocation(state: unknown = window.history.state): AppRoute {
+  const fromHash = hashToRoute(window.location.hash);
+  if (fromHash) return fromHash;
+
   const key = (state as HistoryState | null)?.appRoute;
   if (typeof key === "string") {
     const parsed = deserializeRoute(key);
@@ -99,4 +158,25 @@ export function routeFromPopState(state: unknown): AppRoute {
 
 export function isHistoryManagedRoute(route: AppRoute): boolean {
   return route.name !== "startup" && route.name !== "blocked";
+}
+
+export function seedInitialBrowserHistory(): void {
+  if (new URLSearchParams(window.location.search).has("payment")) return;
+  if ((window.history.state as HistoryState | null)?.appRoute) return;
+
+  const hash = window.location.hash;
+  if (!hash || hash === "#") {
+    window.history.replaceState({ appRoute: MAIN_KEY } satisfies HistoryState, "", historyUrl(MAIN_HASH));
+    window.history.pushState({ appRoute: MAIN_KEY } satisfies HistoryState, "", historyUrl(MAIN_HASH));
+    return;
+  }
+
+  const parsed = hashToRoute(hash);
+  if (parsed && isHistoryManagedRoute(parsed)) {
+    window.history.replaceState(
+      { appRoute: serializeRoute(parsed) } satisfies HistoryState,
+      "",
+      historyUrl(routeToHash(parsed)),
+    );
+  }
 }
