@@ -18,9 +18,6 @@ import {
 } from "./storage";
 import {
   allowedDates,
-  allowedHourRange,
-  allowedMinuteRange,
-  canSubmitOrderForSelectedDate,
   findEarliestValidSlot,
   formatDateTime,
   formatMoney,
@@ -31,8 +28,8 @@ import {
   normalizeMenuName,
   normalizeRequestedTime,
   pickupBoundsForDate,
-  scheduleForDate,
   toMoscowParts,
+  validateRequestedTime,
 } from "./timeRules";
 import {
   isHistoryManagedRoute,
@@ -57,6 +54,8 @@ import "./styles.css";
 seedInitialBrowserHistory();
 
 const DELIVERY_FEE_RUB = 200;
+const HOUR_WHEEL_VALUES = Array.from({ length: 24 }, (_, index) => String(index).padStart(2, "0"));
+const MINUTE_WHEEL_VALUES = Array.from({ length: 60 }, (_, index) => String(index).padStart(2, "0"));
 
 function isValidDeliveryPhone(value: string): boolean {
   const digits = value.replace(/\D/g, "");
@@ -761,9 +760,7 @@ function CartScreen({
         const schedule = config.weekly_schedule ?? weeklySchedule;
         if (!userPickedTime.current) {
           setRequestedTime(findEarliestValidSlot(now, maxCooking, schedule));
-          return;
         }
-        setRequestedTime((current) => normalizeRequestedTime(current, now, maxCooking, schedule));
       });
     };
     sync();
@@ -784,57 +781,28 @@ function CartScreen({
   const days = dates
     .filter((date) => date.year === effectiveSelected.year && date.month === effectiveSelected.month)
     .map((date) => date.day);
-  const hourRange = selectedBounds.isValid
-    ? allowedHourRange(effectiveSelected, selectedBounds.minMs, selectedBounds.maxMs)
-    : [];
   const displayTime = toMoscowParts(requestedTime);
-  const pickerHour = selectedInAllowed ? displayTime.hour : (hourRange[0] ?? toMoscowParts(selectedBounds.minMs).hour);
-  const minuteRange = selectedBounds.isValid
-    ? allowedMinuteRange(effectiveSelected, pickerHour, selectedBounds.minMs, selectedBounds.maxMs)
-    : [];
-  const isTimeValid =
-    scheduleReady &&
-    selectedBounds.isValid &&
-    selectedInAllowed &&
-    requestedTime >= selectedBounds.minMs &&
-    requestedTime <= selectedBounds.maxMs &&
-    canSubmitOrderForSelectedDate(effectiveSelected, nowMs, weeklySchedule);
-  const selectedDaySchedule = scheduleReady ? scheduleForDate(effectiveSelected, weeklySchedule) : null;
-
-  useEffect(() => {
-    if (!scheduleReady || !selectedBounds.isValid) return;
-    if (!selectedInAllowed || requestedTime < selectedBounds.minMs || requestedTime > selectedBounds.maxMs) {
-      setRequestedTime(normalizeRequestedTime(requestedTime, serverNow(), maxCooking, weeklySchedule));
-    }
-  }, [scheduleReady, selectedInAllowed, selectedBounds.isValid, selectedBounds.minMs, selectedBounds.maxMs, requestedTime, maxCooking, weeklySchedule, serverNow]);
+  const timeValidation = scheduleReady
+    ? validateRequestedTime(requestedTime, nowMs, maxCooking, weeklySchedule)
+    : { valid: false as const, reason: "Загружаем расписание..." };
+  const isTimeValid = timeValidation.valid;
 
   const setDate = (year: number, month: number, day: number) => {
     userPickedTime.current = true;
     const current = toMoscowParts(requestedTime);
-    const next = moscowToMs(year, month, day, current.hour, current.minute);
-    setRequestedTime(normalizeRequestedTime(next, serverNow(), maxCooking, weeklySchedule));
+    setRequestedTime(moscowToMs(year, month, day, current.hour, current.minute));
   };
 
   const setHour = (hour: number) => {
     userPickedTime.current = true;
     const current = toMoscowParts(requestedTime);
-    const bounds = pickupBoundsForDate(current, serverNow(), maxCooking, weeklySchedule);
-    const minutes = allowedMinuteRange(current, hour, bounds.minMs, bounds.maxMs);
-    const minute = minutes.includes(current.minute) ? current.minute : minutes[0] ?? 0;
-    setRequestedTime(normalizeRequestedTime(moscowToMs(current.year, current.month, current.day, hour, minute), serverNow(), maxCooking, weeklySchedule));
+    setRequestedTime(moscowToMs(current.year, current.month, current.day, hour, current.minute));
   };
 
   const setMinute = (minute: number) => {
     userPickedTime.current = true;
     const current = toMoscowParts(requestedTime);
-    setRequestedTime(
-      normalizeRequestedTime(
-        moscowToMs(current.year, current.month, current.day, current.hour, minute),
-        serverNow(),
-        maxCooking,
-        weeklySchedule,
-      ),
-    );
+    setRequestedTime(moscowToMs(current.year, current.month, current.day, current.hour, minute));
   };
 
   const itemsTotal = cart.reduce((sum, item) => sum + item.totalPrice, 0);
@@ -948,25 +916,25 @@ function CartScreen({
           <p className="cart-schedule-title">Выберите дату и время когда должен быть готов заказ</p>
           <div className="wheel-row">
             <WheelPicker
-              key={`hour-${hourRange.join(",")}`}
-              values={hourRange.map((hour) => String(hour).padStart(2, "0"))}
-              selectedIndex={Math.max(0, hourRange.indexOf(displayTime.hour))}
+              cyclic
+              values={HOUR_WHEEL_VALUES}
+              selectedIndex={displayTime.hour}
               width={wheels.hourWidth}
               height={wheels.height}
               itemHeight={wheels.itemHeight}
-              onChange={(index) => setHour(hourRange[index])}
+              onChange={setHour}
             />
             <span className="wheel-separator" style={{ fontSize: wheels.separatorSize }}>
               :
             </span>
             <WheelPicker
-              key={`minute-${displayTime.hour}-${minuteRange.join(",")}`}
-              values={minuteRange.map((minute) => String(minute).padStart(2, "0"))}
-              selectedIndex={Math.max(0, minuteRange.indexOf(displayTime.minute))}
+              cyclic
+              values={MINUTE_WHEEL_VALUES}
+              selectedIndex={displayTime.minute}
               width={wheels.minuteWidth}
               height={wheels.height}
               itemHeight={wheels.itemHeight}
-              onChange={(index) => setMinute(minuteRange[index])}
+              onChange={setMinute}
             />
           </div>
           <div className="wheel-row">
@@ -1038,9 +1006,7 @@ function CartScreen({
         )}
         {!isTimeValid && (
           <p className="text-error" style={{ width: contentWidth, textAlign: "center" }}>
-            {selectedDaySchedule
-              ? `Выберите время от ${selectedDaySchedule.open_time} + ${maxCooking} мин до ${selectedDaySchedule.last_order_time} + ${maxCooking} мин. На сегодня заказ принимаем до ${selectedDaySchedule.last_order_time}.`
-              : "Загружаем расписание..."}
+            {!timeValidation.valid ? timeValidation.reason : "Выберите корректное время заказа."}
           </p>
         )}
         {error && <p className="text-error">{error}</p>}

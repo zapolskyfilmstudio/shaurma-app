@@ -6,6 +6,7 @@ import {
   readWheelIndex,
   wheelIndexToScrollTop,
   wheelItemVisual,
+  wrapWheelIndex,
 } from "./wheelPicker";
 
 export type TopIcon = "home" | "profile" | "cart";
@@ -144,6 +145,7 @@ export function WheelPicker({
   height,
   itemHeight,
   onChange,
+  cyclic = false,
 }: {
   values: string[];
   selectedIndex: number;
@@ -151,43 +153,64 @@ export function WheelPicker({
   height: number;
   itemHeight: number;
   onChange: (index: number) => void;
+  cyclic?: boolean;
 }) {
+  const baseLength = values.length;
+  const repeatCount = cyclic && baseLength > 0 ? 5 : 1;
+  const middleRepeat = Math.floor(repeatCount / 2);
+  const displayedValues =
+    cyclic && baseLength > 0 ? Array.from({ length: repeatCount }, () => values).flat() : values;
+  const displayedLength = displayedValues.length;
+
+  const toDisplayedIndex = useCallback(
+    (valueIndex: number) => middleRepeat * baseLength + wrapWheelIndex(valueIndex, baseLength),
+    [baseLength, middleRepeat],
+  );
+
+  const toValueIndex = useCallback(
+    (displayIndex: number) => (cyclic && baseLength > 0 ? wrapWheelIndex(displayIndex, baseLength) : clampWheelIndex(displayIndex, baseLength)),
+    [baseLength, cyclic],
+  );
+
   const listRef = useRef<HTMLDivElement>(null);
   const animatingRef = useRef(false);
   const userScrollingRef = useRef(false);
-  const lastEmittedIndexRef = useRef(selectedIndex);
+  const lastEmittedIndexRef = useRef(wrapWheelIndex(selectedIndex, baseLength));
   const touchSamplesRef = useRef<{ y: number; t: number }[]>([]);
   const rafRef = useRef<number | null>(null);
-  const safeIndex = clampWheelIndex(selectedIndex, values.length);
+  const safeDisplayedIndex = cyclic
+    ? toDisplayedIndex(selectedIndex)
+    : clampWheelIndex(selectedIndex, displayedLength);
   const [visuals, setVisuals] = useState<{ opacity: number; scale: number }[]>(() =>
-    values.map((_, index) => wheelItemVisual(index - safeIndex)),
+    displayedValues.map((_, index) => wheelItemVisual(index - safeDisplayedIndex)),
   );
   const padY = Math.max(0, (height - itemHeight) / 2);
 
   const updateVisuals = useCallback(
     (scrollTop: number) => {
       const centerIndex = scrollTop / itemHeight;
-      setVisuals(values.map((_, index) => wheelItemVisual(index - centerIndex)));
+      setVisuals(displayedValues.map((_, index) => wheelItemVisual(index - centerIndex)));
     },
-    [itemHeight, values],
+    [displayedValues, itemHeight],
   );
 
   const emitSelection = useCallback(
-    (index: number) => {
-      const clamped = clampWheelIndex(index, values.length);
-      if (clamped === lastEmittedIndexRef.current) return;
-      lastEmittedIndexRef.current = clamped;
-      onChange(clamped);
+    (valueIndex: number) => {
+      const normalized = wrapWheelIndex(valueIndex, baseLength);
+      if (normalized === lastEmittedIndexRef.current) return;
+      lastEmittedIndexRef.current = normalized;
+      onChange(normalized);
     },
-    [onChange, values.length],
+    [baseLength, onChange],
   );
 
   const snapToIndex = useCallback(
-    async (index: number, animate = true) => {
+    async (displayIndex: number, animate = true) => {
       const node = listRef.current;
-      if (!node || values.length === 0) return clampWheelIndex(index, values.length);
-      const clamped = clampWheelIndex(index, values.length);
-      const target = wheelIndexToScrollTop(clamped, itemHeight);
+      if (!node || displayedLength === 0) return wrapWheelIndex(selectedIndex, baseLength);
+      const valueIndex = toValueIndex(displayIndex);
+      const targetDisplayIndex = cyclic ? toDisplayedIndex(valueIndex) : clampWheelIndex(displayIndex, displayedLength);
+      const target = wheelIndexToScrollTop(targetDisplayIndex, itemHeight);
       animatingRef.current = true;
       userScrollingRef.current = false;
       if (animate) {
@@ -196,25 +219,25 @@ export function WheelPicker({
         node.scrollTop = target;
       }
       updateVisuals(target);
-      lastEmittedIndexRef.current = clamped;
+      lastEmittedIndexRef.current = valueIndex;
       animatingRef.current = false;
-      emitSelection(clamped);
-      return clamped;
+      emitSelection(valueIndex);
+      return valueIndex;
     },
-    [emitSelection, itemHeight, updateVisuals, values.length],
+    [cyclic, displayedLength, emitSelection, itemHeight, selectedIndex, toDisplayedIndex, toValueIndex, updateVisuals, baseLength],
   );
 
   useEffect(() => {
     if (userScrollingRef.current || animatingRef.current) return;
     const node = listRef.current;
     if (!node) return;
-    const target = wheelIndexToScrollTop(safeIndex, itemHeight);
+    const target = wheelIndexToScrollTop(safeDisplayedIndex, itemHeight);
     if (Math.abs(node.scrollTop - target) > 1) {
       node.scrollTop = target;
     }
-    lastEmittedIndexRef.current = safeIndex;
+    lastEmittedIndexRef.current = wrapWheelIndex(selectedIndex, baseLength);
     updateVisuals(target);
-  }, [safeIndex, itemHeight, updateVisuals, values.join("\u0001")]);
+  }, [baseLength, itemHeight, safeDisplayedIndex, selectedIndex, updateVisuals, displayedValues.join("\u0001")]);
 
   const settleScroll = useCallback(() => {
     const node = listRef.current;
@@ -246,7 +269,7 @@ export function WheelPicker({
 
   const handleTouchEnd = () => {
     const node = listRef.current;
-    if (!node || values.length === 0) return;
+    if (!node || displayedLength === 0) return;
     const samples = touchSamplesRef.current;
     touchSamplesRef.current = [];
     if (samples.length >= 2) {
@@ -277,7 +300,7 @@ export function WheelPicker({
     };
   }, [settleScroll]);
 
-  if (values.length === 0) {
+  if (displayedLength === 0) {
     return (
       <div className="wheel wheel--empty" style={{ width, height }}>
         <div className="wheel-selection" style={{ height: itemHeight, marginTop: padY }} />
@@ -303,8 +326,8 @@ export function WheelPicker({
           if (userScrollingRef.current) settleScroll();
         }}
       >
-        {values.map((value, index) => {
-          const visual = visuals[index] ?? wheelItemVisual(index - safeIndex);
+        {displayedValues.map((value, index) => {
+          const visual = visuals[index] ?? wheelItemVisual(index - safeDisplayedIndex);
           return (
             <div
               key={`${value}-${index}`}

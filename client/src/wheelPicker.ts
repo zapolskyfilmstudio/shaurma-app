@@ -64,6 +64,11 @@ export function clampWheelIndex(index: number, length: number): number {
   return Math.max(0, Math.min(index, length - 1));
 }
 
+export function wrapWheelIndex(index: number, length: number): number {
+  if (length <= 0) return 0;
+  return ((index % length) + length) % length;
+}
+
 export function wheelItemVisual(distanceFromCenter: number) {
   const abs = Math.min(Math.abs(distanceFromCenter), 2.5);
   return {
