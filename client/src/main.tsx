@@ -736,6 +736,7 @@ function CartScreen({
 
   useEffect(() => {
     if (!scheduleReady) return;
+    if (userPickedTime.current) return;
     setRequestedTime((current) =>
       normalizeRequestedTime(current || findEarliestValidSlot(serverNow(), maxCooking, weeklySchedule), serverNow(), maxCooking, weeklySchedule),
     );
@@ -793,17 +794,21 @@ function CartScreen({
     setRequestedTime(moscowToMs(year, month, day, current.hour, current.minute));
   };
 
-  const setHour = (hour: number) => {
+  const setHour = useCallback((hour: number) => {
     userPickedTime.current = true;
-    const current = toMoscowParts(requestedTime);
-    setRequestedTime(moscowToMs(current.year, current.month, current.day, hour, current.minute));
-  };
+    setRequestedTime((current) => {
+      const parts = toMoscowParts(current);
+      return moscowToMs(parts.year, parts.month, parts.day, hour, parts.minute);
+    });
+  }, []);
 
-  const setMinute = (minute: number) => {
+  const setMinute = useCallback((minute: number) => {
     userPickedTime.current = true;
-    const current = toMoscowParts(requestedTime);
-    setRequestedTime(moscowToMs(current.year, current.month, current.day, current.hour, minute));
-  };
+    setRequestedTime((current) => {
+      const parts = toMoscowParts(current);
+      return moscowToMs(parts.year, parts.month, parts.day, parts.hour, minute);
+    });
+  }, []);
 
   const itemsTotal = cart.reduce((sum, item) => sum + item.totalPrice, 0);
   const orderTotal = itemsTotal + (deliveryEnabled ? DELIVERY_FEE_RUB : 0);

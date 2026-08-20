@@ -156,7 +156,7 @@ export function WheelPicker({
   cyclic?: boolean;
 }) {
   const baseLength = values.length;
-  const repeatCount = cyclic && baseLength > 0 ? 5 : 1;
+  const repeatCount = cyclic && baseLength > 0 ? 51 : 1;
   const middleRepeat = Math.floor(repeatCount / 2);
   const displayedValues =
     cyclic && baseLength > 0 ? Array.from({ length: repeatCount }, () => values).flat() : values;
@@ -219,13 +219,26 @@ export function WheelPicker({
         node.scrollTop = target;
       }
       updateVisuals(target);
-      lastEmittedIndexRef.current = valueIndex;
       animatingRef.current = false;
       emitSelection(valueIndex);
       return valueIndex;
     },
     [cyclic, displayedLength, emitSelection, itemHeight, selectedIndex, toDisplayedIndex, toValueIndex, updateVisuals, baseLength],
   );
+
+  const recenterScrollIfNeeded = useCallback(() => {
+    const node = listRef.current;
+    if (!node || !cyclic || baseLength === 0) return;
+    const index = readWheelIndex(node.scrollTop, itemHeight);
+    const lowerBound = baseLength * 2;
+    const upperBound = displayedLength - baseLength * 3;
+    if (index < lowerBound || index > upperBound) {
+      const valueIndex = wrapWheelIndex(index, baseLength);
+      const centeredIndex = toDisplayedIndex(valueIndex);
+      node.scrollTop = wheelIndexToScrollTop(centeredIndex, itemHeight);
+      updateVisuals(node.scrollTop);
+    }
+  }, [baseLength, cyclic, displayedLength, itemHeight, toDisplayedIndex, updateVisuals]);
 
   useEffect(() => {
     if (userScrollingRef.current || animatingRef.current) return;
@@ -242,9 +255,10 @@ export function WheelPicker({
   const settleScroll = useCallback(() => {
     const node = listRef.current;
     if (!node || animatingRef.current) return;
+    recenterScrollIfNeeded();
     const index = readWheelIndex(node.scrollTop, itemHeight);
     void snapToIndex(index, true);
-  }, [itemHeight, snapToIndex]);
+  }, [itemHeight, recenterScrollIfNeeded, snapToIndex]);
 
   const handleScroll = () => {
     const node = listRef.current;
