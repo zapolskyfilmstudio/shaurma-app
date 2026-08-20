@@ -1462,6 +1462,15 @@ function OrdersScreen({
               </p>
               <p>Оформлен: {formatDateTime(order.created_at)}</p>
               <p>Готовность: {formatDateTime(order.requested_time)}</p>
+              {order.delivery_enabled && (
+                <div className="order-delivery-info">
+                  <p>
+                    <strong>Доставка</strong>
+                  </p>
+                  <p>Телефон: {order.delivery_phone || "не указан"}</p>
+                  <p>Адрес: {order.delivery_address || "не указан"}</p>
+                </div>
+              )}
               {order.general_comment && <p>Комментарий: {order.general_comment}</p>}
               {order.items.map((item) => (
                 <p key={item.id}>

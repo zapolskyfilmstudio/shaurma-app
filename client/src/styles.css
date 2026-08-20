@@ -623,6 +623,18 @@ button.card {
   line-height: 1.4;
 }
 
+.order-delivery-info {
+  margin: 10px 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+}
+
+.order-delivery-info p {
+  margin: 4px 0 0;
+}
+
 .checkout-banks {
   display: flex;
   flex-direction: column;

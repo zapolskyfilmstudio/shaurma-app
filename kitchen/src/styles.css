@@ -239,6 +239,21 @@ label input[type="checkbox"] {
   margin: 6px 0 0;
 }
 
+.delivery-info--prominent {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: #fff7ed;
+  border: 2px solid #fb923c;
+  color: #9a3412;
+}
+
+.delivery-info--prominent strong {
+  display: block;
+  font-size: 1.05rem;
+  margin-bottom: 4px;
+}
+
 .order-times {
   display: grid;
   grid-template-columns: 1fr 1fr;
