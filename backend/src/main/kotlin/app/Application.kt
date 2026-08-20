@@ -546,7 +546,7 @@ private fun Route.publicRoutes(config: AppConfig, database: AppDatabase, tbankCl
                 workStartTime = todaySchedule.openTime.toString(),
                 cutoffTime = todaySchedule.lastOrderTime.toString(),
                 isOpen = !nowTime.isBefore(todaySchedule.openTime) && !nowTime.isAfter(todaySchedule.lastOrderTime),
-                paymentEnabled = tbankClient.config.enabled,
+                paymentEnabled = tbankClient.config.enabled || config.paymentSkip,
                 weeklySchedule = scheduleDtos,
             )
         }

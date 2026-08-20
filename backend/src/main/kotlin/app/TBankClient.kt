@@ -30,7 +30,11 @@ data class TBankConfig(
     val successUrl: String,
     val failUrl: String,
 ) {
-    val enabled: Boolean = terminalKey.isNotBlank() && password.isNotBlank()
+    val enabled: Boolean =
+        terminalKey.isNotBlank() &&
+            password.isNotBlank() &&
+            !terminalKey.equals("change_me", ignoreCase = true) &&
+            !password.equals("change_me", ignoreCase = true)
 
     companion object {
         fun fromEnv(): TBankConfig = TBankConfig(
