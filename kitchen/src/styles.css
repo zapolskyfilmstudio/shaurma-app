@@ -229,9 +229,14 @@ label input[type="checkbox"] {
 }
 
 .client-line,
-.comment {
+.comment,
+.delivery-info {
   margin-top: 12px;
   color: #4b5563;
+}
+
+.delivery-info p {
+  margin: 6px 0 0;
 }
 
 .order-times {
