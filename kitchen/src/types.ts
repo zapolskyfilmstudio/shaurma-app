@@ -42,6 +42,9 @@ export type OrderDto = {
   cooking_start_time: number;
   total_price: number;
   general_comment?: string | null;
+  delivery_enabled?: boolean;
+  delivery_phone?: string | null;
+  delivery_address?: string | null;
   items: OrderItemDto[];
 };
 

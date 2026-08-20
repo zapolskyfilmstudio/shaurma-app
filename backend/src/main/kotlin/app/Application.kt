@@ -65,6 +65,7 @@ import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.max
 
 private val MoscowZone: ZoneId = ZoneId.of("Europe/Moscow")
+private const val DELIVERY_FEE_RUB = 200
 private val paymentLogger = LoggerFactory.getLogger("app.payment")
 
 private fun expandCorsOrigins(origins: List<String>): List<String> =
@@ -295,6 +296,9 @@ class ApiException(
 @Serializable data class CreateOrderRequest(
     val requestedTime: Long,
     val generalComment: String? = null,
+    val deliveryEnabled: Boolean = false,
+    val deliveryPhone: String? = null,
+    val deliveryAddress: String? = null,
     val items: List<CreateOrderItemRequest>,
 )
 @Serializable data class CreateOrderItemRequest(
@@ -346,6 +350,9 @@ class ApiException(
     val cookingStartTime: Long,
     val totalPrice: Int,
     val generalComment: String? = null,
+    val deliveryEnabled: Boolean = false,
+    val deliveryPhone: String? = null,
+    val deliveryAddress: String? = null,
     val items: List<OrderItemDto>,
 )
 @Serializable data class PendingOrderResponse(val order: OrderDto? = null)
@@ -359,6 +366,9 @@ class ApiException(
     val cookingStartTime: Long,
     val totalPrice: Int,
     val generalComment: String? = null,
+    val deliveryEnabled: Boolean = false,
+    val deliveryPhone: String? = null,
+    val deliveryAddress: String? = null,
     val items: List<OrderItemDto>,
     val client: ClientDto,
 )
@@ -462,6 +472,9 @@ private data class OrderRow(
     val cookingStartTime: Long,
     val totalPrice: Int,
     val generalComment: String?,
+    val deliveryEnabled: Boolean,
+    val deliveryPhone: String?,
+    val deliveryAddress: String?,
     val client: ClientDto? = null,
 )
 
@@ -1019,7 +1032,9 @@ private fun createOrderDraft(
     if (request.requestedTime < cookingStartTime + maxCookingMinutes * 60_000L) {
         throw ApiException(HttpStatusCode.BadRequest, "INVALID_REQUESTED_TIME", "Requested time is too early for cooking time")
     }
-    val totalPrice = builtItems.sumOf { it.totalPrice }
+    validateDelivery(request)
+    val itemsTotal = builtItems.sumOf { it.totalPrice }
+    val totalPrice = itemsTotal + if (request.deliveryEnabled) DELIVERY_FEE_RUB else 0
     val createdDate = Instant.ofEpochMilli(now).atZone(MoscowZone).toLocalDate()
     val datePart = createdDate.format(java.time.format.DateTimeFormatter.ofPattern("ddMM"))
 
@@ -1339,6 +1354,23 @@ private fun truncateToMinute(time: LocalTime): LocalTime = time.withSecond(0).wi
 private fun truncateToMoscowMinute(epochMs: Long): Long =
     Instant.ofEpochMilli(epochMs).atZone(MoscowZone).withSecond(0).withNano(0).toInstant().toEpochMilli()
 
+private fun validateDelivery(request: CreateOrderRequest) {
+    if (!request.deliveryEnabled) return
+    val phone = request.deliveryPhone?.trim().orEmpty()
+    val address = request.deliveryAddress?.trim().orEmpty()
+    if (phone.isEmpty() || address.isEmpty()) {
+        throw ApiException(HttpStatusCode.BadRequest, "DELIVERY_INCOMPLETE", "Укажите телефон и адрес для доставки")
+    }
+    if (!isValidDeliveryPhone(phone)) {
+        throw ApiException(HttpStatusCode.BadRequest, "INVALID_DELIVERY_PHONE", "Неверный формат телефона для доставки")
+    }
+}
+
+private fun isValidDeliveryPhone(phone: String): Boolean {
+    val digits = phone.filter { it.isDigit() }
+    return digits.length == 11 && (digits.startsWith("7") || digits.startsWith("8"))
+}
+
 private fun validateRequestedTime(
     requestedTime: Long,
     now: Long,
@@ -1444,9 +1476,9 @@ private fun insertOrder(
         """
         INSERT INTO orders (
             public_id, device_id, status, payment_status, paid_at, created_at, updated_at, requested_time,
-            cooking_start_time, total_price, general_comment
+            cooking_start_time, total_price, general_comment, delivery_enabled, delivery_phone, delivery_address
         )
-        VALUES (?, ?, 'NEW', ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, 'NEW', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         RETURNING id
         """.trimIndent()
     ).use { statement ->
@@ -1460,6 +1492,14 @@ private fun insertOrder(
         statement.setLong(8, cookingStartTime)
         statement.setInt(9, totalPrice)
         statement.setNullableString(10, request.generalComment?.trim()?.takeIf { it.isNotEmpty() })
+        statement.setBoolean(11, request.deliveryEnabled)
+        if (request.deliveryEnabled) {
+            statement.setString(12, request.deliveryPhone?.trim())
+            statement.setString(13, request.deliveryAddress?.trim())
+        } else {
+            statement.setNull(12, Types.VARCHAR)
+            statement.setNull(13, Types.VARCHAR)
+        }
         statement.executeQuery().use { result ->
             result.next()
             result.getLong(1)
@@ -1747,6 +1787,9 @@ private fun readKitchenOrders(connection: Connection, sinceUpdatedAt: Long, sinc
             cookingStartTime = row.cookingStartTime,
             totalPrice = row.totalPrice,
             generalComment = row.generalComment,
+            deliveryEnabled = row.deliveryEnabled,
+            deliveryPhone = row.deliveryPhone,
+            deliveryAddress = row.deliveryAddress,
             items = readOrderItems(connection, row.id),
             client = row.client!!,
         )
@@ -2199,6 +2242,9 @@ private fun ResultSet.toOrderRow(client: ClientDto? = null): OrderRow = OrderRow
     cookingStartTime = getLong("cooking_start_time"),
     totalPrice = getInt("total_price"),
     generalComment = getString("general_comment"),
+    deliveryEnabled = getBoolean("delivery_enabled"),
+    deliveryPhone = getString("delivery_phone"),
+    deliveryAddress = getString("delivery_address"),
     client = client,
 )
 
@@ -2235,6 +2281,9 @@ private fun OrderRow.toOrderDto(items: List<OrderItemDto>): OrderDto = OrderDto(
     cookingStartTime = cookingStartTime,
     totalPrice = totalPrice,
     generalComment = generalComment,
+    deliveryEnabled = deliveryEnabled,
+    deliveryPhone = deliveryPhone,
+    deliveryAddress = deliveryAddress,
     items = items,
 )
 

@@ -9,6 +9,9 @@ export interface CartDraft {
   items: CartItem[];
   requestedTime: number | null;
   comment: string;
+  deliveryEnabled: boolean;
+  deliveryPhone: string;
+  deliveryAddress: string;
 }
 
 export function getDeviceId(): string {
@@ -36,7 +39,7 @@ export function saveProfile(profile: ClientProfile): void {
 
 function normalizeCartDraft(raw: unknown): CartDraft {
   if (Array.isArray(raw)) {
-    return { items: raw as CartItem[], requestedTime: null, comment: "" };
+    return { items: raw as CartItem[], requestedTime: null, comment: "", deliveryEnabled: false, deliveryPhone: "", deliveryAddress: "" };
   }
   if (raw && typeof raw === "object") {
     const value = raw as Partial<CartDraft>;
@@ -44,18 +47,21 @@ function normalizeCartDraft(raw: unknown): CartDraft {
       items: Array.isArray(value.items) ? value.items : [],
       requestedTime: typeof value.requestedTime === "number" ? value.requestedTime : null,
       comment: typeof value.comment === "string" ? value.comment : "",
+      deliveryEnabled: Boolean(value.deliveryEnabled),
+      deliveryPhone: typeof value.deliveryPhone === "string" ? value.deliveryPhone : "",
+      deliveryAddress: typeof value.deliveryAddress === "string" ? value.deliveryAddress : "",
     };
   }
-  return { items: [], requestedTime: null, comment: "" };
+  return { items: [], requestedTime: null, comment: "", deliveryEnabled: false, deliveryPhone: "", deliveryAddress: "" };
 }
 
 export function loadCartDraft(): CartDraft {
   const raw = localStorage.getItem(CART_KEY);
-  if (!raw) return { items: [], requestedTime: null, comment: "" };
+  if (!raw) return { items: [], requestedTime: null, comment: "", deliveryEnabled: false, deliveryPhone: "", deliveryAddress: "" };
   try {
     return normalizeCartDraft(JSON.parse(raw));
   } catch {
-    return { items: [], requestedTime: null, comment: "" };
+    return { items: [], requestedTime: null, comment: "", deliveryEnabled: false, deliveryPhone: "", deliveryAddress: "" };
   }
 }
 

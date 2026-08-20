@@ -56,6 +56,13 @@ import "./styles.css";
 
 seedInitialBrowserHistory();
 
+const DELIVERY_FEE_RUB = 200;
+
+function isValidDeliveryPhone(value: string): boolean {
+  const digits = value.replace(/\D/g, "");
+  return digits.length === 11 && (digits.startsWith("7") || digits.startsWith("8"));
+}
+
 const MENU_BUTTONS = [
   "ШАУРМА",
   "ГРИЛЬ НА УГЛЯХ",
@@ -715,6 +722,10 @@ function CartScreen({
   const buttonHeight = viewport.height * 0.85 * 0.075;
   const wheels = wheelMetrics(viewport.width);
   const [comment, setComment] = useState(initialDraft.comment);
+  const [deliveryEnabled, setDeliveryEnabled] = useState(initialDraft.deliveryEnabled);
+  const [deliveryPhone, setDeliveryPhone] = useState(initialDraft.deliveryPhone);
+  const [deliveryAddress, setDeliveryAddress] = useState(initialDraft.deliveryAddress);
+  const [deliveryNoticeOpen, setDeliveryNoticeOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [fontSize, setFontSize] = useState(22);
@@ -732,8 +743,15 @@ function CartScreen({
   }, [scheduleReady, weeklySchedule, maxCooking, serverNow]);
 
   useEffect(() => {
-    saveCartDraft({ items: cart, requestedTime, comment });
-  }, [cart, requestedTime, comment]);
+    saveCartDraft({
+      items: cart,
+      requestedTime,
+      comment,
+      deliveryEnabled,
+      deliveryPhone,
+      deliveryAddress,
+    });
+  }, [cart, requestedTime, comment, deliveryEnabled, deliveryPhone, deliveryAddress]);
 
   useEffect(() => {
     if (!scheduleReady) return;
@@ -819,11 +837,27 @@ function CartScreen({
     );
   };
 
+  const itemsTotal = cart.reduce((sum, item) => sum + item.totalPrice, 0);
+  const orderTotal = itemsTotal + (deliveryEnabled ? DELIVERY_FEE_RUB : 0);
+  const deliveryPhoneValid = !deliveryEnabled || isValidDeliveryPhone(deliveryPhone);
+  const deliveryAddressValid = !deliveryEnabled || deliveryAddress.trim().length > 0;
+  const deliveryValid = deliveryPhoneValid && deliveryAddressValid;
+  const canSubmitOrder = isTimeValid && deliveryValid && canPlaceOrder;
+
+  const toggleDelivery = () => {
+    if (deliveryEnabled) {
+      setDeliveryEnabled(false);
+      return;
+    }
+    setDeliveryEnabled(true);
+    setDeliveryNoticeOpen(true);
+  };
+
   const submit = async () => {
-    if (!isTimeValid) return;
+    if (!canSubmitOrder) return;
     setSubmitting(true);
     setError(null);
-    const orderTotal = cart.reduce((sum, item) => sum + item.totalPrice, 0);
+    const orderTotalForPayment = itemsTotal + (deliveryEnabled ? DELIVERY_FEE_RUB : 0);
     try {
       const config = await api.config();
       const schedule = config.weekly_schedule ?? weeklySchedule;
@@ -831,6 +865,9 @@ function CartScreen({
       const result = await api.createOrder({
         requested_time: normalizedTime,
         general_comment: comment || null,
+        delivery_enabled: deliveryEnabled,
+        delivery_phone: deliveryEnabled ? deliveryPhone.trim() : null,
+        delivery_address: deliveryEnabled ? deliveryAddress.trim() : null,
         items: cart.map((item) => ({
           menu_item_id: item.menuItemId,
           additions_ids: item.additionsIds,
@@ -838,7 +875,7 @@ function CartScreen({
         })),
       });
       if (result.payment_status === "WAITING") {
-        onCheckout(result.public_id, orderTotal);
+        onCheckout(result.public_id, orderTotalForPayment);
         return;
       }
       if (result.payment_status === "PAID" && paymentSkip && !paymentEnabled) {
@@ -899,7 +936,7 @@ function CartScreen({
           </div>
           );
         })}
-        <p style={{ width: contentWidth }}>Итого: {formatMoney(cart.reduce((sum, item) => sum + item.totalPrice, 0))}</p>
+        <p style={{ width: contentWidth }}>Итого: {formatMoney(orderTotal)}</p>
         <textarea
           className="textarea"
           style={{ width: contentWidth }}
@@ -907,56 +944,93 @@ function CartScreen({
           value={comment}
           onChange={(event) => setComment(event.target.value)}
         />
-        <p style={{ width: contentWidth, textAlign: "center" }}>Выберите дату и время когда должен быть готов заказ</p>
-        <div className="wheel-row" style={{ width: contentWidth }}>
-          <WheelPicker
-            key={`hour-${hourRange.join(",")}`}
-            values={hourRange.map((hour) => String(hour).padStart(2, "0"))}
-            selectedIndex={Math.max(0, hourRange.indexOf(displayTime.hour))}
-            width={wheels.hourWidth}
-            height={wheels.height}
-            itemHeight={wheels.itemHeight}
-            onChange={(index) => setHour(hourRange[index])}
-          />
-          <span className="wheel-separator" style={{ fontSize: wheels.separatorSize }}>
-            :
-          </span>
-          <WheelPicker
-            key={`minute-${displayTime.hour}-${minuteRange.join(",")}`}
-            values={minuteRange.map((minute) => String(minute).padStart(2, "0"))}
-            selectedIndex={Math.max(0, minuteRange.indexOf(displayTime.minute))}
-            width={wheels.minuteWidth}
-            height={wheels.height}
-            itemHeight={wheels.itemHeight}
-            onChange={(index) => setMinute(minuteRange[index])}
-          />
+        <div className="cart-schedule" style={{ width: contentWidth }}>
+          <p className="cart-schedule-title">Выберите дату и время когда должен быть готов заказ</p>
+          <div className="wheel-row">
+            <WheelPicker
+              key={`hour-${hourRange.join(",")}`}
+              values={hourRange.map((hour) => String(hour).padStart(2, "0"))}
+              selectedIndex={Math.max(0, hourRange.indexOf(displayTime.hour))}
+              width={wheels.hourWidth}
+              height={wheels.height}
+              itemHeight={wheels.itemHeight}
+              onChange={(index) => setHour(hourRange[index])}
+            />
+            <span className="wheel-separator" style={{ fontSize: wheels.separatorSize }}>
+              :
+            </span>
+            <WheelPicker
+              key={`minute-${displayTime.hour}-${minuteRange.join(",")}`}
+              values={minuteRange.map((minute) => String(minute).padStart(2, "0"))}
+              selectedIndex={Math.max(0, minuteRange.indexOf(displayTime.minute))}
+              width={wheels.minuteWidth}
+              height={wheels.height}
+              itemHeight={wheels.itemHeight}
+              onChange={(index) => setMinute(minuteRange[index])}
+            />
+          </div>
+          <div className="wheel-row">
+            <WheelPicker
+              values={days.map((day) => String(day).padStart(2, "0"))}
+              selectedIndex={Math.max(0, days.indexOf(displayTime.day))}
+              width={wheels.dayWidth}
+              height={wheels.height}
+              itemHeight={wheels.itemHeight}
+              onChange={(index) => setDate(displayTime.year, displayTime.month, days[index])}
+            />
+            <WheelPicker
+              values={months.map((month) => monthNameRu(month))}
+              selectedIndex={Math.max(0, months.indexOf(displayTime.month))}
+              width={wheels.monthWidth}
+              height={wheels.height}
+              itemHeight={wheels.itemHeight}
+              onChange={(index) => setDate(displayTime.year, months[index], displayTime.day)}
+            />
+            <WheelPicker
+              values={years.map(String)}
+              selectedIndex={Math.max(0, years.indexOf(displayTime.year))}
+              width={wheels.yearWidth}
+              height={wheels.height}
+              itemHeight={wheels.itemHeight}
+              onChange={(index) => setDate(years[index], displayTime.month, displayTime.day)}
+            />
+          </div>
         </div>
-        <div className="wheel-row" style={{ width: contentWidth }}>
-          <WheelPicker
-            values={days.map((day) => String(day).padStart(2, "0"))}
-            selectedIndex={Math.max(0, days.indexOf(displayTime.day))}
-            width={wheels.dayWidth}
-            height={wheels.height}
-            itemHeight={wheels.itemHeight}
-            onChange={(index) => setDate(displayTime.year, displayTime.month, days[index])}
-          />
-          <WheelPicker
-            values={months.map((month) => monthNameRu(month))}
-            selectedIndex={Math.max(0, months.indexOf(displayTime.month))}
-            width={wheels.monthWidth}
-            height={wheels.height}
-            itemHeight={wheels.itemHeight}
-            onChange={(index) => setDate(displayTime.year, months[index], displayTime.day)}
-          />
-          <WheelPicker
-            values={years.map(String)}
-            selectedIndex={Math.max(0, years.indexOf(displayTime.year))}
-            width={wheels.yearWidth}
-            height={wheels.height}
-            itemHeight={wheels.itemHeight}
-            onChange={(index) => setDate(years[index], displayTime.month, displayTime.day)}
-          />
-        </div>
+        <button type="button" className="delivery-row" style={{ width: contentWidth }} onClick={toggleDelivery}>
+          <span className={`delivery-toggle${deliveryEnabled ? " is-selected" : ""}`} aria-hidden="true" />
+          <span className="delivery-row-label">Доставка ({DELIVERY_FEE_RUB} руб)</span>
+        </button>
+        {deliveryEnabled && (
+          <>
+            <input
+              className="delivery-input"
+              style={{ width: contentWidth }}
+              type="tel"
+              inputMode="tel"
+              placeholder="Ваш телефон"
+              value={deliveryPhone}
+              onChange={(event) => setDeliveryPhone(event.target.value)}
+            />
+            <input
+              className="delivery-input"
+              style={{ width: contentWidth }}
+              type="text"
+              placeholder="Ваш адрес"
+              value={deliveryAddress}
+              onChange={(event) => setDeliveryAddress(event.target.value)}
+            />
+            {!deliveryPhoneValid && deliveryPhone.trim().length > 0 && (
+              <p className="text-error" style={{ width: contentWidth, textAlign: "center" }}>
+                Телефон: +7XXXXXXXXXX, 8XXXXXXXXXX или 7XXXXXXXXXX
+              </p>
+            )}
+            {deliveryEnabled && !deliveryAddressValid && deliveryAddress.trim().length === 0 && (
+              <p className="text-error" style={{ width: contentWidth, textAlign: "center" }}>
+                Укажите адрес доставки
+              </p>
+            )}
+          </>
+        )}
         {selectedBounds.isValid && (
           <p className="text-muted" style={{ width: contentWidth, textAlign: "center" }}>
             Минимум: {formatDateTime(selectedBounds.minMs)} · максимум: {formatDateTime(selectedBounds.maxMs)}
@@ -986,9 +1060,31 @@ function CartScreen({
           width={buttonWidth}
           height={buttonHeight}
           fontSize={fontSize}
-          enabled={isTimeValid && !submitting && canPlaceOrder}
+          enabled={canSubmitOrder && !submitting}
           onClick={() => void submit()}
         />
+        {deliveryNoticeOpen && (
+          <div className="removal-modal-backdrop" onClick={() => setDeliveryNoticeOpen(false)}>
+            <div
+              className="removal-modal-panel delivery-notice-panel"
+              style={{ width: contentWidth }}
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className="removal-modal-body">
+                <p className="delivery-notice-text">Доставка осуществляется только в пределах Шушар</p>
+              </div>
+              <div className="removal-modal-footer">
+                <MenuButton
+                  text="Ок"
+                  width={contentWidth * 0.55}
+                  height={buttonHeight}
+                  fontSize={fontSize}
+                  onClick={() => setDeliveryNoticeOpen(false)}
+                />
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </ScreenLayout>
   );

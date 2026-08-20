@@ -370,6 +370,14 @@ function OrderCard({
 
       {order.general_comment && <div className="comment">Комментарий: {order.general_comment}</div>}
 
+      {order.delivery_enabled && (
+        <div className="delivery-info">
+          <strong>Доставка</strong>
+          <p>Телефон: {order.delivery_phone || "не указан"}</p>
+          <p>Адрес: {order.delivery_address || "не указан"}</p>
+        </div>
+      )}
+
       <div className="order-footer">
         <strong>Итого: {formatMoney(order.total_price)}</strong>
       </div>
