@@ -229,9 +229,29 @@ label input[type="checkbox"] {
 }
 
 .client-line,
-.comment {
+.comment,
+.delivery-info {
   margin-top: 12px;
   color: #4b5563;
+}
+
+.delivery-info p {
+  margin: 6px 0 0;
+}
+
+.delivery-info--prominent {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: #fff7ed;
+  border: 2px solid #fb923c;
+  color: #9a3412;
+}
+
+.delivery-info--prominent strong {
+  display: block;
+  font-size: 1.05rem;
+  margin-bottom: 4px;
 }
 
 .order-times {
@@ -239,6 +259,11 @@ label input[type="checkbox"] {
   grid-template-columns: 1fr 1fr;
   gap: 10px;
   margin: 14px 0;
+}
+
+.order-times-created {
+  grid-column: 1 / -1;
+  padding: 10px 12px;
 }
 
 .order-times div,

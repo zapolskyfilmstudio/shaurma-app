@@ -42,6 +42,9 @@ export type OrderDto = {
   cooking_start_time: number;
   total_price: number;
   general_comment?: string | null;
+  delivery_enabled?: boolean;
+  delivery_phone?: string | null;
+  delivery_address?: string | null;
   items: OrderItemDto[];
 };
 
@@ -138,6 +141,13 @@ export type SettingDto = {
   updated_at: number;
 };
 
+export type DayScheduleDto = {
+  day_of_week: number;
+  open_time: string;
+  last_order_time: string;
+};
+
 export type SettingsResponse = {
   settings: SettingDto[];
+  weekly_schedule: DayScheduleDto[];
 };

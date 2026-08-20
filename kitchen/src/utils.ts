@@ -1,6 +1,7 @@
 import type { OrderStatus } from "./types";
 
 export const MSK_TIME_ZONE = "Europe/Moscow";
+export const DELIVERY_FEE_RUB = 200;
 export const STATUS_CHAIN: OrderStatus[] = ["NEW", "CONFIRMED", "COOKING", "READY", "COMPLETED"];
 
 export const STATUS_LABEL: Record<OrderStatus, string> = {
