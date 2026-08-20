@@ -20,6 +20,7 @@ import {
   STATUS_LABEL,
   dayLabel,
   formatDateTime,
+  DELIVERY_FEE_RUB,
   formatMoney,
   moscowDateKey,
   moscowTodayKey,
@@ -347,6 +348,10 @@ function OrderCard({
       )}
 
       <dl className="order-times">
+        <div className="order-times-created">
+          <dt>Заказ оформлен</dt>
+          <dd>{formatDateTime(order.created_at)}</dd>
+        </div>
         <div>
           <dt>Выдача</dt>
           <dd>{formatDateTime(order.requested_time)}</dd>
@@ -362,9 +367,7 @@ function OrderCard({
           <div className="order-item" key={item.id}>
             <div>
               <strong>{item.name_snapshot}</strong>
-              <span>
-                {item.weight_snapshot} г · {formatMoney(item.price_snapshot)}
-              </span>
+              <span>{formatMoney(item.price_snapshot)}</span>
             </div>
             {item.additions_snapshot.length > 0 && (
               <p>✅ {item.additions_snapshot.map((addition) => `${addition.name} +${formatMoney(addition.price)}`).join(", ")}</p>
@@ -374,6 +377,14 @@ function OrderCard({
             )}
           </div>
         ))}
+        {order.delivery_enabled && (
+          <div className="order-item order-item-delivery">
+            <div>
+              <strong>Доставка</strong>
+              <span>{formatMoney(DELIVERY_FEE_RUB)}</span>
+            </div>
+          </div>
+        )}
       </div>
 
       {order.general_comment && <div className="comment">Комментарий: {order.general_comment}</div>}
