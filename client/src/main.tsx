@@ -408,6 +408,20 @@ function App() {
         publicId={route.publicId}
         totalPrice={route.totalPrice}
         onHome={goMain}
+        onOpenSbp={(publicId, totalPrice) => navigate({ name: "sbpBanks", publicId, totalPrice })}
+        onPaid={finishPaidOrder}
+        onFailed={goOrdersAfterPaymentError}
+      />
+    );
+  }
+
+  if (route.name === "sbpBanks") {
+    return (
+      <SbpBanksScreen
+        topHeight={topHeight}
+        viewport={viewport}
+        publicId={route.publicId}
+        onHome={goMain}
         onPaid={finishPaidOrder}
         onFailed={goOrdersAfterPaymentError}
       />
@@ -983,6 +997,7 @@ function CheckoutScreen({
   publicId,
   totalPrice,
   onHome,
+  onOpenSbp,
   onPaid,
   onFailed,
 }: {
@@ -991,18 +1006,16 @@ function CheckoutScreen({
   publicId: string;
   totalPrice: number;
   onHome: () => void;
+  onOpenSbp: (publicId: string, totalPrice: number) => void;
   onPaid: () => void;
   onFailed: () => void;
 }) {
   const contentWidth = viewport.width * 0.9;
-  const optionHeight = viewport.height * 0.85 * 0.12;
+  const optionMinHeight = viewport.height * 0.85 * 0.16;
   const [paymentUrl, setPaymentUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState("Выберите способ оплаты");
-  const [banks, setBanks] = useState<SbpBankDto[]>([]);
-  const [banksLoading, setBanksLoading] = useState(false);
-  const [sbpExpanded, setSbpExpanded] = useState(false);
   const finishedRef = useRef(false);
 
   const finishPaid = useCallback(() => {
@@ -1078,38 +1091,6 @@ function CheckoutScreen({
     };
   }, [publicId, finishPaid, finishFailed]);
 
-  const openSbp = async () => {
-    setSbpExpanded(true);
-    setBanksLoading(true);
-    setError(null);
-    setStatusMessage("Выберите банк для оплаты через СБП");
-    try {
-      const response = await api.getSbpBanks(publicId);
-      setBanks(response.banks);
-      if (response.banks.length === 0) {
-        const link = await api.getSbpLink(publicId);
-        window.location.href = link.link;
-      }
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Не удалось открыть СБП");
-      finishFailed();
-    } finally {
-      setBanksLoading(false);
-    }
-  };
-
-  const payWithBank = async (bankId: string) => {
-    setError(null);
-    setStatusMessage("Откройте приложение банка и подтвердите оплату");
-    try {
-      const link = await api.getSbpLink(publicId, bankId);
-      window.location.href = link.link;
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Не удалось открыть оплату через СБП");
-      finishFailed();
-    }
-  };
-
   const openCard = () => {
     if (!paymentUrl) {
       setError("Не удалось получить ссылку на оплату картой");
@@ -1127,21 +1108,176 @@ function CheckoutScreen({
         <p className="checkout-amount">{formatMoney(totalPrice)}</p>
         <p className="text-muted">{statusMessage}</p>
         {loading && <div className="spinner" />}
-        <button type="button" className="checkout-option" style={{ height: optionHeight }} disabled={loading} onClick={() => void openSbp()}>
+        <button
+          type="button"
+          className="checkout-option"
+          style={{ minHeight: optionMinHeight }}
+          disabled={loading}
+          onClick={() => onOpenSbp(publicId, totalPrice)}
+        >
           Система Быстрых Платежей
         </button>
-        <button type="button" className="checkout-option" style={{ height: optionHeight }} disabled={loading || !paymentUrl} onClick={openCard}>
+        <button
+          type="button"
+          className="checkout-option"
+          style={{ minHeight: optionMinHeight }}
+          disabled={loading || !paymentUrl}
+          onClick={openCard}
+        >
           Перевод по карте
         </button>
-        {banksLoading && <div className="spinner" />}
-        {sbpExpanded && banks.length > 0 && (
+        {error && <p className="text-error">{error}</p>}
+      </div>
+    </ScreenLayout>
+  );
+}
+
+function SbpBanksScreen({
+  topHeight,
+  viewport,
+  publicId,
+  onHome,
+  onPaid,
+  onFailed,
+}: {
+  topHeight: number;
+  viewport: { width: number; height: number };
+  publicId: string;
+  onHome: () => void;
+  onPaid: () => void;
+  onFailed: () => void;
+}) {
+  const contentWidth = viewport.width * 0.9;
+  const [banks, setBanks] = useState<SbpBankDto[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [statusMessage, setStatusMessage] = useState("Выберите банк для оплаты через СБП");
+  const [searchQuery, setSearchQuery] = useState("");
+  const finishedRef = useRef(false);
+
+  const finishPaid = useCallback(() => {
+    if (finishedRef.current) return;
+    finishedRef.current = true;
+    onPaid();
+  }, [onPaid]);
+
+  const finishFailed = useCallback(() => {
+    if (finishedRef.current) return;
+    finishedRef.current = true;
+    onFailed();
+  }, [onFailed]);
+
+  const filteredBanks = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    if (!query) return banks;
+    return banks.filter((bank) => bank.bank_name.toLowerCase().includes(query));
+  }, [banks, searchQuery]);
+
+  useEffect(() => {
+    setPendingOrderId(publicId);
+    let cancelled = false;
+    const loadBanks = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const response = await api.getSbpBanks(publicId);
+        if (cancelled) return;
+        setBanks(response.banks);
+        if (response.banks.length === 0) {
+          const link = await api.getSbpLink(publicId);
+          window.location.href = link.link;
+        }
+      } catch (caught) {
+        if (!cancelled) {
+          setError(caught instanceof Error ? caught.message : "Не удалось открыть СБП");
+          finishFailed();
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+    void loadBanks();
+    return () => {
+      cancelled = true;
+    };
+  }, [publicId, finishFailed]);
+
+  useEffect(() => {
+    let cancelled = false;
+    let timer = 0;
+    const poll = async () => {
+      try {
+        const status = await api.getPaymentStatus(publicId);
+        if (cancelled || finishedRef.current) return;
+        if (status.payment_status === "PAID") {
+          setStatusMessage("Оплата подтверждена");
+          finishPaid();
+          return;
+        }
+        if (status.payment_status === "FAILED") {
+          setStatusMessage("Оплата не прошла");
+          finishFailed();
+          return;
+        }
+        timer = window.setTimeout(poll, 2000);
+      } catch {
+        if (!cancelled && !finishedRef.current) {
+          timer = window.setTimeout(poll, 3000);
+        }
+      }
+    };
+    void poll();
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [publicId, finishPaid, finishFailed]);
+
+  const payWithBank = async (bankId: string) => {
+    setError(null);
+    setStatusMessage("Откройте приложение банка и подтвердите оплату");
+    try {
+      const link = await api.getSbpLink(publicId, bankId);
+      window.location.href = link.link;
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Не удалось открыть оплату через СБП");
+      finishFailed();
+    }
+  };
+
+  return (
+    <ScreenLayout topHeight={topHeight} left="home" right="home" onLeft={onHome} onRight={onHome}>
+      <div className="sbp-banks-screen" style={{ width: contentWidth }}>
+        <h2>Ваш Банк</h2>
+        <p className="text-muted">{statusMessage}</p>
+        <label className="sbp-search">
+          <span className="sbp-search-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" focusable="false">
+              <circle cx="11" cy="11" r="7" />
+              <path d="M20 20L16 16" />
+            </svg>
+          </span>
+          <input
+            type="search"
+            className="sbp-search-input"
+            placeholder="Поиск банка"
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            aria-label="Поиск банка"
+          />
+        </label>
+        {loading && <div className="spinner" />}
+        {!loading && filteredBanks.length > 0 && (
           <div className="checkout-banks">
-            {banks.map((bank) => (
+            {filteredBanks.map((bank) => (
               <button key={bank.bank_id} type="button" className="checkout-bank" onClick={() => void payWithBank(bank.bank_id)}>
                 {bank.bank_name}
               </button>
             ))}
           </div>
+        )}
+        {!loading && banks.length > 0 && filteredBanks.length === 0 && (
+          <p className="text-muted">Банки не найдены</p>
         )}
         {error && <p className="text-error">{error}</p>}
       </div>

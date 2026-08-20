@@ -9,6 +9,7 @@ export type AppRoute =
   | { name: "orders" }
   | { name: "profile" }
   | { name: "checkout"; publicId: string; totalPrice: number }
+  | { name: "sbpBanks"; publicId: string; totalPrice: number }
   | { name: "payment"; result: "success" | "fail"; publicId: string };
 
 type HistoryState = {
@@ -30,6 +31,8 @@ export function serializeRoute(route: AppRoute): string {
       return `payment:${route.result}:${route.publicId}`;
     case "checkout":
       return `checkout:${route.publicId}:${route.totalPrice}`;
+    case "sbpBanks":
+      return `sbpBanks:${route.publicId}:${route.totalPrice}`;
     default:
       return route.name;
   }
@@ -59,6 +62,16 @@ export function deserializeRoute(key: string): AppRoute | null {
     const totalPrice = Number(rest.slice(separator + 1));
     if (publicId && Number.isFinite(totalPrice)) {
       return { name: "checkout", publicId, totalPrice };
+    }
+  }
+  if (key.startsWith("sbpBanks:")) {
+    const rest = key.slice("sbpBanks:".length);
+    const separator = rest.lastIndexOf(":");
+    if (separator === -1) return null;
+    const publicId = rest.slice(0, separator);
+    const totalPrice = Number(rest.slice(separator + 1));
+    if (publicId && Number.isFinite(totalPrice)) {
+      return { name: "sbpBanks", publicId, totalPrice };
     }
   }
   if (key.startsWith("payment:")) {
@@ -94,6 +107,8 @@ export function routeToHash(route: AppRoute): string {
       return `#/payment/${route.result}/${encodeURIComponent(route.publicId)}`;
     case "checkout":
       return `#/checkout/${encodeURIComponent(route.publicId)}/${route.totalPrice}`;
+    case "sbpBanks":
+      return `#/sbp/${encodeURIComponent(route.publicId)}/${route.totalPrice}`;
     default:
       return MAIN_HASH;
   }
@@ -128,6 +143,13 @@ export function hashToRoute(hash: string): AppRoute | null {
     const totalPrice = Number(segments[2]);
     if (publicId && Number.isFinite(totalPrice)) {
       return { name: "checkout", publicId, totalPrice };
+    }
+  }
+  if (head === "sbp" && second) {
+    const publicId = decodeURIComponent(second);
+    const totalPrice = Number(segments[2]);
+    if (publicId && Number.isFinite(totalPrice)) {
+      return { name: "sbpBanks", publicId, totalPrice };
     }
   }
   return null;
