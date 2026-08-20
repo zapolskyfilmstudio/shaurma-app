@@ -18,6 +18,7 @@ export interface PublicConfigResponse {
   cutoff_time: string;
   is_open: boolean;
   payment_enabled: boolean;
+  payment_skip: boolean;
   weekly_schedule: DayScheduleDto[];
 }
 

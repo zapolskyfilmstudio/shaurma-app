@@ -147,6 +147,7 @@ function App() {
   const [cart, setCart] = useState<CartItem[]>(() => loadCartDraft().items);
   const [weeklySchedule, setWeeklySchedule] = useState<DayScheduleDto[]>([]);
   const [paymentEnabled, setPaymentEnabled] = useState(false);
+  const [paymentSkip, setPaymentSkip] = useState(false);
   const [serverOffset, setServerOffset] = useState(profile?.serverTimeOffsetMs ?? 0);
 
   const serverNow = useCallback(() => Date.now() + serverOffset, [serverOffset]);
@@ -232,6 +233,7 @@ function App() {
     saveProfile(nextProfile);
     setWeeklySchedule(config.weekly_schedule ?? []);
     setPaymentEnabled(config.payment_enabled);
+    setPaymentSkip(config.payment_skip);
     setCategories(menu.categories);
     if (init.is_blocked) {
       finishBootstrap({ name: "blocked" });
@@ -393,6 +395,7 @@ function App() {
         }}
         onPaid={finishPaidOrder}
         paymentEnabled={paymentEnabled}
+        paymentSkip={paymentSkip}
       />
     );
   }
@@ -675,6 +678,7 @@ function CartScreen({
   onCheckout,
   onPaid,
   paymentEnabled,
+  paymentSkip,
 }: {
   cart: CartItem[];
   topHeight: number;
@@ -688,7 +692,9 @@ function CartScreen({
   onCheckout: (publicId: string, totalPrice: number) => void;
   onPaid: () => void;
   paymentEnabled: boolean;
+  paymentSkip: boolean;
 }) {
+  const canPlaceOrder = paymentEnabled || paymentSkip;
   const initialDraft = useMemo(() => loadCartDraft(), []);
   const contentWidth = viewport.width * 0.9;
   const buttonWidth = viewport.width * 0.8;
@@ -814,12 +820,16 @@ function CartScreen({
           removals_ids: item.removalsIds,
         })),
       });
-      if (result.payment_status === "PAID") {
+      if (result.payment_status === "WAITING") {
+        onCheckout(result.public_id, orderTotal);
+        return;
+      }
+      if (result.payment_status === "PAID" && paymentSkip && !paymentEnabled) {
         onPaid();
         return;
       }
-      if (result.payment_status === "WAITING") {
-        onCheckout(result.public_id, orderTotal);
+      if (result.payment_status === "PAID") {
+        onPaid();
         return;
       }
       setError("Не удалось оформить заказ. Попробуйте позже.");
@@ -943,9 +953,14 @@ function CartScreen({
           </p>
         )}
         {error && <p className="text-error">{error}</p>}
-        {!paymentEnabled && (
+        {!canPlaceOrder && (
           <p className="text-error" style={{ width: contentWidth, textAlign: "center" }}>
-            Онлайн-оплата временно недоступна — администратор должен настроить T-Bank на сервере.
+            Онлайн-оплата не настроена. Укажите TBANK_TERMINAL_KEY и TBANK_PASSWORD в .env на сервере.
+          </p>
+        )}
+        {paymentSkip && !paymentEnabled && (
+          <p className="text-muted" style={{ width: contentWidth, textAlign: "center" }}>
+            Тестовый режим: заказ без онлайн-оплаты.
           </p>
         )}
         <MenuButton text="Добавить к заказу" width={buttonWidth} height={buttonHeight} fontSize={fontSize} onClick={onHome} />
@@ -954,7 +969,7 @@ function CartScreen({
           width={buttonWidth}
           height={buttonHeight}
           fontSize={fontSize}
-          enabled={isTimeValid && !submitting && paymentEnabled}
+          enabled={isTimeValid && !submitting && canPlaceOrder}
           onClick={() => void submit()}
         />
       </div>
