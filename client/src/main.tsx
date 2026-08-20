@@ -825,8 +825,11 @@ function CartScreen({
     setError(null);
     const orderTotal = cart.reduce((sum, item) => sum + item.totalPrice, 0);
     try {
+      const config = await api.config();
+      const schedule = config.weekly_schedule ?? weeklySchedule;
+      const normalizedTime = normalizeRequestedTime(requestedTime, config.server_time, maxCooking, schedule);
       const result = await api.createOrder({
-        requested_time: requestedTime,
+        requested_time: normalizedTime,
         general_comment: comment || null,
         items: cart.map((item) => ({
           menu_item_id: item.menuItemId,

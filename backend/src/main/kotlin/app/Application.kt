@@ -1334,6 +1334,11 @@ private fun buildOrderItem(connection: Connection, request: CreateOrderItemReque
     )
 }
 
+private fun truncateToMinute(time: LocalTime): LocalTime = time.withSecond(0).withNano(0)
+
+private fun truncateToMoscowMinute(epochMs: Long): Long =
+    Instant.ofEpochMilli(epochMs).atZone(MoscowZone).withSecond(0).withNano(0).toInstant().toEpochMilli()
+
 private fun validateRequestedTime(
     requestedTime: Long,
     now: Long,
@@ -1349,16 +1354,16 @@ private fun validateRequestedTime(
     }
     val daySchedule = schedule.forDate(requestedDate)
     if (requestedDate == today) {
-        val nowTime = nowZoned.toLocalTime()
+        val nowTime = truncateToMinute(nowZoned.toLocalTime())
         if (nowTime.isAfter(daySchedule.lastOrderTime)) {
             throw ApiException(HttpStatusCode.BadRequest, "ORDER_ACCEPTANCE_CLOSED", "Today's order acceptance is closed")
         }
     }
-    val requestedLocalTime = requested.toLocalTime()
+    val requestedLocalTime = truncateToMinute(requested.toLocalTime())
     val minTime = daySchedule.openTime.plusMinutes(maxCookingMinutes.toLong())
     val maxTime = daySchedule.lastOrderTime.plusMinutes(maxCookingMinutes.toLong())
     val effectiveMin = if (requestedDate == today) {
-        val nowPlusPrep = nowZoned.toLocalTime().plusMinutes(maxCookingMinutes.toLong())
+        val nowPlusPrep = truncateToMinute(nowZoned.toLocalTime()).plusMinutes(maxCookingMinutes.toLong())
         if (nowPlusPrep.isAfter(minTime)) nowPlusPrep else minTime
     } else {
         minTime
@@ -1383,7 +1388,7 @@ private fun calculateCookingStart(
     val daySchedule = schedule.forDate(requestedDate)
     val openInstant = requestedDate.atTime(daySchedule.openTime).atZone(MoscowZone).toInstant().toEpochMilli()
     var cookingStart = requestedTime - maxCookingMinutes * 60_000L
-    cookingStart = max(cookingStart, now)
+    cookingStart = max(cookingStart, truncateToMoscowMinute(now))
     cookingStart = max(cookingStart, openInstant)
     return cookingStart
 }
