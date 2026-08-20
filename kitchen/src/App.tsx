@@ -361,7 +361,7 @@ function OrderCard({
               <p>✅ {item.additions_snapshot.map((addition) => `${addition.name} +${formatMoney(addition.price)}`).join(", ")}</p>
             )}
             {item.removals_snapshot.length > 0 && (
-              <p>❌ {item.removals_snapshot.map((removal) => removal.name).join(", ")}</p>
+              <p>НЕ КЛАСТЬ: {item.removals_snapshot.map((removal) => removal.name).join(", ")}</p>
             )}
           </div>
         ))}
@@ -799,9 +799,9 @@ function ClientsTab() {
 
 function WorkTab({ onSoundsChanged }: { onSoundsChanged: () => Promise<void> }) {
   const [settings, setSettings] = useState<Record<string, string>>({
-    work_start_time: "12:00",
-    cutoff_regular: "22:45",
-    cutoff_grill: "21:45",
+    work_start_time: "00:00",
+    cutoff_regular: "23:00",
+    cutoff_grill: "23:00",
   });
   const [settingsRows, setSettingsRows] = useState<SettingDto[]>([]);
   const [message, setMessage] = useState<string | null>(null);
