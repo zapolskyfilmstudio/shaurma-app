@@ -18,6 +18,8 @@ import {
 } from "./storage";
 import {
   allowedDates,
+  allowedMinuteRange,
+  canSubmitOrderForSelectedDate,
   findEarliestValidSlot,
   formatDateTime,
   formatMoney,
@@ -28,8 +30,8 @@ import {
   normalizeMenuName,
   normalizeRequestedTime,
   pickupBoundsForDate,
+  scheduleForDate,
   toMoscowParts,
-  validateRequestedTime,
 } from "./timeRules";
 import {
   isHistoryManagedRoute,
@@ -736,7 +738,6 @@ function CartScreen({
 
   useEffect(() => {
     if (!scheduleReady) return;
-    if (userPickedTime.current) return;
     setRequestedTime((current) =>
       normalizeRequestedTime(current || findEarliestValidSlot(serverNow(), maxCooking, weeklySchedule), serverNow(), maxCooking, weeklySchedule),
     );
@@ -761,7 +762,9 @@ function CartScreen({
         const schedule = config.weekly_schedule ?? weeklySchedule;
         if (!userPickedTime.current) {
           setRequestedTime(findEarliestValidSlot(now, maxCooking, schedule));
+          return;
         }
+        setRequestedTime((current) => normalizeRequestedTime(current, now, maxCooking, schedule));
       });
     };
     sync();
@@ -783,32 +786,57 @@ function CartScreen({
     .filter((date) => date.year === effectiveSelected.year && date.month === effectiveSelected.month)
     .map((date) => date.day);
   const displayTime = toMoscowParts(requestedTime);
-  const timeValidation = scheduleReady
-    ? validateRequestedTime(requestedTime, nowMs, maxCooking, weeklySchedule)
-    : { valid: false as const, reason: "Загружаем расписание..." };
-  const isTimeValid = timeValidation.valid;
+  const isTimeValid =
+    scheduleReady &&
+    selectedBounds.isValid &&
+    selectedInAllowed &&
+    requestedTime >= selectedBounds.minMs &&
+    requestedTime <= selectedBounds.maxMs &&
+    canSubmitOrderForSelectedDate(effectiveSelected, nowMs, weeklySchedule);
+  const selectedDaySchedule = scheduleReady ? scheduleForDate(effectiveSelected, weeklySchedule) : null;
+
+  useEffect(() => {
+    if (!scheduleReady || !selectedBounds.isValid) return;
+    if (!selectedInAllowed || requestedTime < selectedBounds.minMs || requestedTime > selectedBounds.maxMs) {
+      setRequestedTime(normalizeRequestedTime(requestedTime, serverNow(), maxCooking, weeklySchedule));
+    }
+  }, [scheduleReady, selectedInAllowed, selectedBounds.isValid, selectedBounds.minMs, selectedBounds.maxMs, requestedTime, maxCooking, weeklySchedule, serverNow]);
 
   const setDate = (year: number, month: number, day: number) => {
     userPickedTime.current = true;
     const current = toMoscowParts(requestedTime);
-    setRequestedTime(moscowToMs(year, month, day, current.hour, current.minute));
+    const next = moscowToMs(year, month, day, current.hour, current.minute);
+    setRequestedTime(normalizeRequestedTime(next, serverNow(), maxCooking, weeklySchedule));
   };
 
-  const setHour = useCallback((hour: number) => {
+  const setHour = (hour: number) => {
     userPickedTime.current = true;
-    setRequestedTime((current) => {
-      const parts = toMoscowParts(current);
-      return moscowToMs(parts.year, parts.month, parts.day, hour, parts.minute);
-    });
-  }, []);
+    const current = toMoscowParts(requestedTime);
+    const bounds = pickupBoundsForDate(current, serverNow(), maxCooking, weeklySchedule);
+    const minutes = allowedMinuteRange(current, hour, bounds.minMs, bounds.maxMs);
+    const minute = minutes.includes(current.minute) ? current.minute : minutes[0] ?? 0;
+    setRequestedTime(
+      normalizeRequestedTime(
+        moscowToMs(current.year, current.month, current.day, hour, minute),
+        serverNow(),
+        maxCooking,
+        weeklySchedule,
+      ),
+    );
+  };
 
-  const setMinute = useCallback((minute: number) => {
+  const setMinute = (minute: number) => {
     userPickedTime.current = true;
-    setRequestedTime((current) => {
-      const parts = toMoscowParts(current);
-      return moscowToMs(parts.year, parts.month, parts.day, parts.hour, minute);
-    });
-  }, []);
+    const current = toMoscowParts(requestedTime);
+    setRequestedTime(
+      normalizeRequestedTime(
+        moscowToMs(current.year, current.month, current.day, current.hour, minute),
+        serverNow(),
+        maxCooking,
+        weeklySchedule,
+      ),
+    );
+  };
 
   const itemsTotal = cart.reduce((sum, item) => sum + item.totalPrice, 0);
   const orderTotal = itemsTotal + (deliveryEnabled ? DELIVERY_FEE_RUB : 0);
@@ -1011,7 +1039,9 @@ function CartScreen({
         )}
         {!isTimeValid && (
           <p className="text-error" style={{ width: contentWidth, textAlign: "center" }}>
-            {!timeValidation.valid ? timeValidation.reason : "Выберите корректное время заказа."}
+            {selectedDaySchedule
+              ? `Выберите время от ${selectedDaySchedule.open_time} + ${maxCooking} мин до ${selectedDaySchedule.last_order_time} + ${maxCooking} мин. На сегодня заказ принимаем до ${selectedDaySchedule.last_order_time}.`
+              : "Загружаем расписание..."}
           </p>
         )}
         {error && <p className="text-error">{error}</p>}

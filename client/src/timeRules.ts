@@ -256,33 +256,6 @@ export function normalizeRequestedTime(
   return requestedMs;
 }
 
-export function validateRequestedTime(
-  requestedMs: number,
-  serverNowMs: number,
-  prepMinutes: number,
-  weeklySchedule: DayScheduleDto[],
-): { valid: true } | { valid: false; reason: string } {
-  const selected = toMoscowParts(requestedMs);
-  if (!isDateAllowed(selected, serverNowMs, prepMinutes, weeklySchedule)) {
-    return { valid: false, reason: "Выбранная дата недоступна для заказа." };
-  }
-  const bounds = pickupBoundsForDate(selected, serverNowMs, prepMinutes, weeklySchedule);
-  if (!bounds.isValid) {
-    return { valid: false, reason: "На выбранный день заказы уже не принимаются." };
-  }
-  if (!canSubmitOrderForSelectedDate(selected, serverNowMs, weeklySchedule)) {
-    const schedule = scheduleForDate(selected, weeklySchedule);
-    return { valid: false, reason: `На сегодня заказ принимаем до ${schedule.last_order_time}.` };
-  }
-  if (requestedMs < bounds.minMs) {
-    return { valid: false, reason: `Слишком рано. Минимальное время: ${formatDateTime(bounds.minMs)}.` };
-  }
-  if (requestedMs > bounds.maxMs) {
-    return { valid: false, reason: `Слишком поздно. Максимальное время: ${formatDateTime(bounds.maxMs)}.` };
-  }
-  return { valid: true };
-}
-
 /** @deprecated kept for callers migrating off single-day settings */
 export function isCafeOpen(nowMs: number, workStart: string, cutoff: string): boolean {
   const now = toMoscowParts(nowMs);
