@@ -730,23 +730,39 @@ function CartScreen({
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [fontSize, setFontSize] = useState(22);
-  const userPickedTime = useRef(initialDraft.requestedTime != null);
+  const userPickedTime = useRef(initialDraft.requestedTimeLocked ?? false);
   const maxCooking = cart.length ? Math.max(...cart.map((item) => item.cookingTime)) : 0;
   const scheduleReady = weeklySchedule.length === 7;
+  const [clockTick, setClockTick] = useState(0);
 
   const [requestedTime, setRequestedTime] = useState<number>(() => initialDraft.requestedTime ?? 0);
 
   useEffect(() => {
+    const timer = window.setInterval(() => setClockTick((value) => value + 1), 10_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
     if (!scheduleReady) return;
-    setRequestedTime((current) =>
-      normalizeRequestedTime(current || findEarliestValidSlot(serverNow(), maxCooking, weeklySchedule), serverNow(), maxCooking, weeklySchedule),
-    );
-  }, [scheduleReady, weeklySchedule, maxCooking, serverNow]);
+    if (userPickedTime.current) {
+      setRequestedTime((current) =>
+        normalizeRequestedTime(
+          current || initialDraft.requestedTime || findEarliestValidSlot(serverNow(), maxCooking, weeklySchedule),
+          serverNow(),
+          maxCooking,
+          weeklySchedule,
+        ),
+      );
+      return;
+    }
+    setRequestedTime(findEarliestValidSlot(serverNow(), maxCooking, weeklySchedule));
+  }, [scheduleReady, weeklySchedule, maxCooking, serverNow, clockTick]);
 
   useEffect(() => {
     saveCartDraft({
       items: cart,
       requestedTime,
+      requestedTimeLocked: userPickedTime.current,
       comment,
       deliveryEnabled,
       deliveryPhone,
@@ -768,7 +784,7 @@ function CartScreen({
       });
     };
     sync();
-    const timer = window.setInterval(sync, 8000);
+    const timer = window.setInterval(sync, 8_000);
     return () => window.clearInterval(timer);
   }, [maxCooking, scheduleReady, weeklySchedule]);
 
@@ -797,10 +813,28 @@ function CartScreen({
 
   useEffect(() => {
     if (!scheduleReady || !selectedBounds.isValid) return;
+    if (!userPickedTime.current) {
+      const earliest = findEarliestValidSlot(serverNow(), maxCooking, weeklySchedule);
+      if (requestedTime !== earliest) {
+        setRequestedTime(earliest);
+      }
+      return;
+    }
     if (!selectedInAllowed || requestedTime < selectedBounds.minMs || requestedTime > selectedBounds.maxMs) {
       setRequestedTime(normalizeRequestedTime(requestedTime, serverNow(), maxCooking, weeklySchedule));
     }
-  }, [scheduleReady, selectedInAllowed, selectedBounds.isValid, selectedBounds.minMs, selectedBounds.maxMs, requestedTime, maxCooking, weeklySchedule, serverNow]);
+  }, [
+    scheduleReady,
+    selectedInAllowed,
+    selectedBounds.isValid,
+    selectedBounds.minMs,
+    selectedBounds.maxMs,
+    requestedTime,
+    maxCooking,
+    weeklySchedule,
+    serverNow,
+    clockTick,
+  ]);
 
   const setDate = (year: number, month: number, day: number) => {
     userPickedTime.current = true;

@@ -8,6 +8,7 @@ export const PENDING_ORDER_KEY = "pending_order_public_id";
 export interface CartDraft {
   items: CartItem[];
   requestedTime: number | null;
+  requestedTimeLocked?: boolean;
   comment: string;
   deliveryEnabled: boolean;
   deliveryPhone: string;
@@ -39,29 +40,30 @@ export function saveProfile(profile: ClientProfile): void {
 
 function normalizeCartDraft(raw: unknown): CartDraft {
   if (Array.isArray(raw)) {
-    return { items: raw as CartItem[], requestedTime: null, comment: "", deliveryEnabled: false, deliveryPhone: "", deliveryAddress: "" };
+    return { items: raw as CartItem[], requestedTime: null, requestedTimeLocked: false, comment: "", deliveryEnabled: false, deliveryPhone: "", deliveryAddress: "" };
   }
   if (raw && typeof raw === "object") {
     const value = raw as Partial<CartDraft>;
     return {
       items: Array.isArray(value.items) ? value.items : [],
       requestedTime: typeof value.requestedTime === "number" ? value.requestedTime : null,
+      requestedTimeLocked: Boolean(value.requestedTimeLocked),
       comment: typeof value.comment === "string" ? value.comment : "",
       deliveryEnabled: Boolean(value.deliveryEnabled),
       deliveryPhone: typeof value.deliveryPhone === "string" ? value.deliveryPhone : "",
       deliveryAddress: typeof value.deliveryAddress === "string" ? value.deliveryAddress : "",
     };
   }
-  return { items: [], requestedTime: null, comment: "", deliveryEnabled: false, deliveryPhone: "", deliveryAddress: "" };
+  return { items: [], requestedTime: null, requestedTimeLocked: false, comment: "", deliveryEnabled: false, deliveryPhone: "", deliveryAddress: "" };
 }
 
 export function loadCartDraft(): CartDraft {
   const raw = localStorage.getItem(CART_KEY);
-  if (!raw) return { items: [], requestedTime: null, comment: "", deliveryEnabled: false, deliveryPhone: "", deliveryAddress: "" };
+  if (!raw) return { items: [], requestedTime: null, requestedTimeLocked: false, comment: "", deliveryEnabled: false, deliveryPhone: "", deliveryAddress: "" };
   try {
     return normalizeCartDraft(JSON.parse(raw));
   } catch {
-    return { items: [], requestedTime: null, comment: "", deliveryEnabled: false, deliveryPhone: "", deliveryAddress: "" };
+    return { items: [], requestedTime: null, requestedTimeLocked: false, comment: "", deliveryEnabled: false, deliveryPhone: "", deliveryAddress: "" };
   }
 }
 
