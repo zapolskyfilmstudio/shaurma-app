@@ -15,7 +15,7 @@ import type {
   StatisticsResponse,
 } from "./types";
 
-const API_URL = (import.meta.env.VITE_API_URL || "http://localhost:8080").replace(/\/$/, "");
+const API_URL = (import.meta.env.VITE_API_URL || "").replace(/\/$/, "");
 const BEARER_TOKEN = import.meta.env.VITE_BEARER_TOKEN || "";
 
 type QueryValue = string | number | boolean | null | undefined;
